@@ -9,8 +9,7 @@ import {highlighter} from "./stitch-source.js"
 //      {type: "parse", id, text, resetView} · {type: "highlight", lines}
 //      {type: "resetZoom"} · {type: "event", event: {type, ...fields}}
 // out: {type: "ready"} · {type: "parsed", id} · {type: "error", id, message}
-//      {type: "hover", source, stitch} · {type: "select", source}
-//      {type: "goto", source}
+//      {type: "hover", source, stitch} · {type: "goto", source}
 
 let show
 let canvas
@@ -24,7 +23,6 @@ onmessage = async ({data}) => {
 		show.viewport = () => ({left: 0, top: 0, ...size})
 		show.onHoverSource = (source, stitch) =>
 			postMessage({type: "hover", source: source ?? null, stitch: stitch ?? null})
-		show.onClickSource = source => postMessage({type: "select", source: source ?? null})
 		show.onDoubleClickSource = source => postMessage({type: "goto", source: source ?? null})
 		postMessage({type: "ready"})
 		return

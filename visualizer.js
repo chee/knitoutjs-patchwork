@@ -78,7 +78,7 @@ function sizeOf(canvas) {
 
 // the stitches are parsed and drawn in a worker on an OffscreenCanvas. the
 // canvas's own events go there to be handled; hover and double click come back
-function workerRenderer(canvas, {onHover, onSelect, onGoto, onFail}) {
+function workerRenderer(canvas, {onHover, onGoto, onFail}) {
 	const offscreen = canvas.transferControlToOffscreen()
 	const worker = new Worker(WORKER_URL, {type: "module"})
 	const parsing = new Map()
@@ -89,7 +89,6 @@ function workerRenderer(canvas, {onHover, onSelect, onGoto, onFail}) {
 	worker.onmessage = ({data}) => {
 		if (data.type === "ready") ready = true
 		else if (data.type === "hover") onHover(data.source, data.stitch)
-		else if (data.type === "select") onSelect(data.source)
 		else if (data.type === "goto") onGoto(data.source)
 		else if (data.type === "parsed" || data.type === "error") {
 			const {resolve, reject} = parsing.get(data.id) ?? {}
@@ -145,11 +144,10 @@ function workerRenderer(canvas, {onHover, onSelect, onGoto, onFail}) {
 
 // the same, drawn on the page: for browsers without OffscreenCanvas, or if
 // the worker can't start
-async function pageRenderer(canvas, {onHover, onSelect, onGoto}) {
+async function pageRenderer(canvas, {onHover, onGoto}) {
 	const {ShowKnitout} = await import("./vendor/show-knitout.js")
 	const show = new ShowKnitout(canvas)
 	show.onHoverSource = (source, stitch) => onHover(source ?? null, stitch ?? null)
-	show.onClickSource = source => onSelect(source ?? null)
 	show.onDoubleClickSource = source => onGoto(source ?? null)
 	return {
 		parse: (text, resetView) => show.parse(text, false, resetView),
@@ -165,8 +163,8 @@ async function pageRenderer(canvas, {onHover, onSelect, onGoto}) {
  * happens in a worker where the browser allows it, so a big file never holds
  * up the page.
  *
- * knitout:hover-source / knitout:select-source (a click) / knitout:goto-source
- * (a double click) events bubble out of `element`
+ * knitout:hover-source / knitout:select-source (a click, not a drag) /
+ * knitout:goto-source (a double click) events bubble out of `element`
  * with {url, line, at}: `at` is every line the stitch came from, as {url,
  * line} (the .js that wrote this .k, and this .k); url and line are the first.
  * knitout:highlight-lines events with {url, start, end} arriving at
@@ -209,7 +207,7 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 	const hint = document.createElement("div")
 	hint.className = "knitout-visualizer-hint"
 	hint.textContent =
-		"point at a stitch to see what it is · double click it to go to its line · hold shift to see the back bed"
+		"point at a stitch to see what it is · click it to find its line · double click to put the cursor there · hold shift to see the back bed"
 	root.appendChild(hint)
 
 	const empty = document.createElement("div")
@@ -246,16 +244,16 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 		)
 	}
 
+	// the stitch under the pointer
+	let hovered = null
+
 	const callbacks = {
 		onHover: (source, stitch) => {
-			dispatch("knitout:hover-source", located(source) ?? {url: null, at: []})
+			hovered = located(source)
+			dispatch("knitout:hover-source", hovered ?? {url: null, at: []})
 			stitchInfo.textContent = describeStitch(stitch, parseSource(source))
 			stitchInfo.hidden = !stitch
 			hint.hidden = Boolean(stitch)
-		},
-		onSelect: source => {
-			const at = located(source)
-			if (at) dispatch("knitout:select-source", at)
 		},
 		onGoto: source => {
 			const at = located(source)
@@ -336,6 +334,19 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 		draw()
 	})()
 
+	// a click is a press that doesn't move: one that does is panning
+	let pressedAt = null
+	function onPointerDown(event) {
+		pressedAt = event.target === canvas ? {x: event.clientX, y: event.clientY} : null
+	}
+	function onPointerUp(event) {
+		const moved = pressedAt && Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y)
+		if (pressedAt && moved < 4 && hovered) dispatch("knitout:select-source", hovered)
+		pressedAt = null
+	}
+	root.addEventListener("pointerdown", onPointerDown)
+	root.addEventListener("pointerup", onPointerUp)
+
 	handle.on("change", scheduleDraw)
 	events.addEventListener("knitout:highlight-lines", onHighlightLines)
 	const resizeObserver = new ResizeObserver(() => renderer?.resize())
@@ -348,6 +359,8 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 		handle.off("change", scheduleDraw)
 		events.removeEventListener("knitout:highlight-lines", onHighlightLines)
 		resizeObserver.disconnect()
+		root.removeEventListener("pointerdown", onPointerDown)
+		root.removeEventListener("pointerup", onPointerUp)
 		renderer?.destroy()
 		root.remove()
 		link.remove()

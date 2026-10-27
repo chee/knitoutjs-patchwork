@@ -117,39 +117,22 @@ export function knitoutEditorIntegration({events, url, onSelectLines}) {
 			return at.find(entry => entry?.url === url)?.line ?? null
 		}
 
-		// pointing at a stitch scrolls its line into view; pointing away puts
-		// the editor back where it was, unless the stitch was clicked
-		let scrolledFrom = null
-
+		// pointing at a stitch lights up its line, but never moves the editor:
+		// scrolling along with the pointer is too much motion
 		function onHover(event) {
-			const lineNumber = lineFor(event.detail)
-			if (lineNumber == null) {
-				view.dispatch({effects: setHoverLine.of(null)})
-				if (scrolledFrom) {
-					view.scrollDOM.scrollTop = scrolledFrom.top
-					view.scrollDOM.scrollLeft = scrolledFrom.left
-					scrolledFrom = null
-				}
-				return
-			}
-			scrolledFrom ??= {
-				top: view.scrollDOM.scrollTop,
-				left: view.scrollDOM.scrollLeft,
-			}
-			view.dispatch({
-				effects: [
-					setHoverLine.of(lineNumber),
-					EditorView.scrollIntoView(lineAt(lineNumber).from, {
-						y: "nearest",
-						yMargin: 48,
-					}),
-				],
-			})
+			view.dispatch({effects: setHoverLine.of(lineFor(event.detail))})
 		}
 
-		// a click on a stitch: stay at its line
+		// a click on a stitch: scroll its line into view
 		function onSelect(event) {
-			if (lineFor(event.detail) != null) scrolledFrom = null
+			const lineNumber = lineFor(event.detail)
+			if (lineNumber == null) return
+			view.dispatch({
+				effects: EditorView.scrollIntoView(lineAt(lineNumber).from, {
+					y: "nearest",
+					yMargin: 48,
+				}),
+			})
 		}
 
 		// double click on a stitch: jump to the line that made it, and put the
@@ -158,7 +141,6 @@ export function knitoutEditorIntegration({events, url, onSelectLines}) {
 			const lineNumber = lineFor(event.detail)
 			if (lineNumber == null) return
 			const line = lineAt(lineNumber)
-			scrolledFrom = null
 			view.dispatch({
 				selection: {anchor: line.from},
 				effects: EditorView.scrollIntoView(line.from, {y: "center"}),
