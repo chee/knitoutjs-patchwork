@@ -5,16 +5,23 @@
 //wrapper shape (same number of lines before the code) as the real call in
 //evalJS, and calls its first argument on what would be the user's first line.
 let _sourceLineOffset = null
+
+//patchwork: the user's code is named with a //# sourceURL, so every engine
+//(chrome, firefox, safari) puts this name and a line number in its stack frames
+const PATTERN_URL = "knitout-pattern.js"
+function patternLine(frame) {
+	const m = frame.match(/knitout-pattern\.js:(\d+):\d+/)
+	return m ? parseInt(m[1]) : null
+}
 async function calibrateSourceLineOffset() {
 	if (_sourceLineOffset !== null) return _sourceLineOffset
 	let reported = null
 	function grab() {
 		let stack = new Error().stack.split(/\n/)
 		for (const frame of stack) {
-			let m = frame.match(/<anonymous>:(\d+):(\d+)\)?$/)
-			if (!m) m = frame.match(/Function:(\d+):(\d+)$/)
-			if (m) {
-				reported = parseInt(m[1])
+			const line = patternLine(frame)
+			if (line !== null) {
+				reported = line
 				break
 			}
 		}
@@ -27,7 +34,7 @@ async function calibrateSourceLineOffset() {
 			return (async () => {
 				require();
 			})();
-			`
+			//# sourceURL=${PATTERN_URL}`
 		)
 		await probe(grab, console)
 	} catch (e) {
@@ -39,7 +46,9 @@ async function calibrateSourceLineOffset() {
 
 //knitout frontend
 //patchwork: options.globals are passed to the code as extra arguments (e.g. a
-//loop budget check), and options.onError gets the error if the code throws
+//loop budget check), options.onError gets the error if the code throws, and
+//options.currentLine() is the line to use where the stack doesn't say.
+//onError(error, line) gets the pattern's line the error came from, if known
 async function evalJS(codeText, options = {}) {
 	const globals = options.globals ?? {}
 	const sourceLineOffset = await calibrateSourceLineOffset()
@@ -759,20 +768,16 @@ Writer.prototype.getNeedleBed = function(needleNum){
 		let stack = err.stack.split(/\n/)
 
 		for (const frame of stack) {
-			//Chrome:
-			let m = frame.match(/<anonymous>:(\d+):(\d+)\)?$/)
-			//Firefox:
-			if (!m) m = frame.match(/Function:(\d+):(\d+)$/)
-			if (m) {
-				let line = parseInt(m[1])
-				return " ;!source:" + (line - sourceLineOffset)
-			}
+			const line = patternLine(frame)
+			if (line !== null) return " ;!source:" + (line - sourceLineOffset)
 		}
+		const line = options.currentLine?.()
+		if (line != null) return " ;!source:" + line
 
 		// console.log(stack) //DEBUG
 
 		//unknown
-		return ";!source:" + -1
+		return ""
 	}
 
 	//patch Writer to grab operations / headers (maybe?)
@@ -849,6 +854,15 @@ Writer.prototype.getNeedleBed = function(needleNum){
 		},
 	}
 
+	//patchwork: the pattern's line an error came from
+	function errorLine(error) {
+		for (const frame of String(error?.stack ?? "").split(/\n/)) {
+			const line = patternLine(frame)
+			if (line !== null) return line - sourceLineOffset
+		}
+		return options.currentLine?.() ?? null
+	}
+
 	if (codeText.startsWith("#!")) {
 		codeText = "//" + codeText
 	}
@@ -862,12 +876,12 @@ Writer.prototype.getNeedleBed = function(needleNum){
 			return (async () => {
 				${codeText}
 			})();
-			`
+			//# sourceURL=${PATTERN_URL}`
 		)
 
 		await run(require, captureConsole, ...Object.values(globals))
 	} catch (e) {
-		if (options.onError) options.onError(e)
+		if (options.onError) options.onError(e, errorLine(e))
 		else console.error(`Code failed to run fully:\n ${e}`)
 	}
 

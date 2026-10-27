@@ -55,7 +55,9 @@ function koTokenize(text, tokens) {
 
 function nextFrame() {
 	return new Promise(function(resolve) {
-		requestAnimationFrame(function() { setTimeout(resolve, 0); });
+		//patchwork: workers may not have requestAnimationFrame
+		if (globalThis.requestAnimationFrame) requestAnimationFrame(function() { setTimeout(resolve, 0); });
+		else setTimeout(resolve, 0);
 	});
 }
 

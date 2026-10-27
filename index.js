@@ -3,18 +3,16 @@ import { newFileDoc } from "./files.js";
 import { newPanel, newGroup, newSplit } from "./layout.js";
 
 export const KnitoutJSDatatype = {
-  async init(doc, repo) {
+  // patchwork calls this inside handle.change without waiting for it, so
+  // everything written to `doc` has to happen before the first await
+  init(doc, repo) {
     doc.title = "Knitout!";
 
-    const k = await repo.create2(newFileDoc("pattern.k"));
-    const js = await repo.create2({
+    const k = repo.create(newFileDoc("pattern.k"));
+    const js = repo.create({
       ...newFileDoc("pattern.knitout.js", defaultJavaScriptContent),
       knitoutTarget: k.url,
     });
-
-    // fill the .k now, so the visualizer has stitches the first time you look
-    const { runInto } = await import("./run.js");
-    await runInto(js, k, repo);
 
     doc.files = [js.url, k.url];
     doc.layout = newSplit("row", [
@@ -22,6 +20,9 @@ export const KnitoutJSDatatype = {
       newGroup([newPanel(k.url, "editor")]),
       newGroup([newPanel(k.url, "visualizer")]),
     ]);
+
+    // fill the .k, so the visualizer has stitches the first time you look
+    import("./run.js").then(({ runInto }) => runInto(js, k, repo));
   },
 
   getTitle(doc) {

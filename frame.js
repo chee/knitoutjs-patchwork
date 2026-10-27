@@ -6,16 +6,20 @@ import { isValidAutomergeUrl } from "@automerge/automerge-repo/slim";
 import {
   TOOLS,
   toolsFor,
-  canOpen,
   fileExtension,
   docColour,
+  docText,
   shortUrl,
   newFileDoc,
 } from "./files.js";
 import {
   findNode,
   findPanel,
+  findPanelShowing,
   newPanel,
+  newGroup,
+  newSplit,
+  addRow,
   openPanels,
   movePanel,
   removePanel,
@@ -27,9 +31,16 @@ import defaultSource from "./default-source.js";
 const STYLESHEET = new URL("./frame.css", import.meta.url).href;
 const MIN_CELL = 80;
 const EDGE = 0.22;
+const MAX_EDGE = 64;
+const CODE_EDGE = 28;
+const OUTER_EDGE = 10;
 
-// what can be dragged in: our own tabs, and docs from the patchwork sidebar
+// what can be dragged in: our own tabs, a pane's edit / view buttons (to open
+// that file with that tool somewhere else), and docs from the sidebar
 const PANEL_TYPE = "application/x-knitoutjs-panel";
+const TOOL_TYPE = "application/x-knitoutjs-tool";
+// drags that place a pane, rather than bring a doc in
+const LAYOUT_TYPES = [PANEL_TYPE, TOOL_TYPE];
 const DOC_TYPES = [
   "text/x-patchwork-dnd",
   "text/x-patchwork-urls",
@@ -37,7 +48,7 @@ const DOC_TYPES = [
 ];
 
 function isOurDrag(dataTransfer) {
-  return [PANEL_TYPE, ...DOC_TYPES].some((type) =>
+  return [...LAYOUT_TYPES, ...DOC_TYPES].some((type) =>
     dataTransfer?.types.includes(type),
   );
 }
@@ -69,16 +80,19 @@ function droppedDocs(dataTransfer) {
     .map((url) => ({ url }));
 }
 
-// which part of a group the pointer is over: an edge to split, or the middle
-function zoneAt(event, rect) {
-  const x = (event.clientX - rect.left) / rect.width;
-  const y = (event.clientY - rect.top) / rect.height;
-  const nearest = Math.min(x, 1 - x, y, 1 - y);
-  if (nearest > EDGE) return "center";
-  if (nearest === x) return "left";
-  if (nearest === 1 - x) return "right";
-  if (nearest === y) return "top";
-  return "bottom";
+// which part of a group the pointer is over: a band along an edge to split,
+// or the middle. `band` is the band's width in pixels
+function zoneAt(event, rect, band) {
+  const across = band ?? Math.min(rect.width * EDGE, MAX_EDGE);
+  const down = band ?? Math.min(rect.height * EDGE, MAX_EDGE);
+  const distances = {
+    left: (event.clientX - rect.left) / across,
+    right: (rect.right - event.clientX) / across,
+    top: (event.clientY - rect.top) / down,
+    bottom: (rect.bottom - event.clientY) / down,
+  };
+  const [edge, distance] = Object.entries(distances).sort((a, b) => a[1] - b[1])[0];
+  return distance < 1 ? edge : "center";
 }
 
 export default function KnitoutFrameTool(handle, element) {
@@ -126,6 +140,8 @@ export default function KnitoutFrameTool(handle, element) {
         extension: "",
         target: null,
         source: null,
+        editable: false,
+        copyOf: null,
       });
       entry = { info, off: null };
       infos.set(url, entry);
@@ -135,10 +151,12 @@ export default function KnitoutFrameTool(handle, element) {
           const update = () => {
             const doc = docHandle.doc();
             setInfo({
-              name: doc?.name || shortUrl(url),
+              name: doc?.name || doc?.title || shortUrl(url),
               extension: fileExtension(doc),
               target: doc?.knitoutTarget ?? null,
               source: doc?.knitoutSource ?? null,
+              editable: typeof doc?.content === "string",
+              copyOf: doc?.knitoutCopyOf ?? null,
             });
           };
           update();
@@ -172,12 +190,13 @@ export default function KnitoutFrameTool(handle, element) {
 
   const [hovered, setHovered] = createSignal(null);
 
+  // linked = a .js and the .k it writes into now (a .k also remembers which
+  // .js wrote it last, but that's history, so it doesn't light up)
+  // (and a .k and its editable copy)
   function linked(a, b) {
     const one = docInfo(a);
     const two = docInfo(b);
-    return (
-      one.target === b || one.source === b || two.target === a || two.source === a
-    );
+    return one.target === b || two.target === a || one.copyOf === b || two.copyOf === a;
   }
 
   function glow(url) {
@@ -187,16 +206,51 @@ export default function KnitoutFrameTool(handle, element) {
     return linked(lit, url) ? "linked" : undefined;
   }
 
-  const hoverProps = (url) => ({
-    onPointerEnter: () => setHovered(url),
-    onPointerLeave: () => setHovered(null),
-  });
+  const unhover = () => setHovered(null);
 
   // ── tools: each panel's tool lives in its own element, which moves with
   //    the panel when the layout changes rather than starting over
 
+  // show a linked doc: if it's open already, bring its tab forward and light
+  // it up for a moment; if not, open it on one side of the pane asking
+  async function reveal(url, fromPanelId, edge, toolId) {
+    if (!url) return;
+    const showing = findPanelShowing(layout.root, url);
+    if (showing) {
+      const { group, index } = showing;
+      updateLayout((tree) => activate(tree, group.id, group.panels[index].id));
+    } else {
+      const doc = (await repo.find(url)).doc();
+      const tool = toolId ?? toolsFor(fileExtension(doc))[0].id;
+      const from = findPanel(layout.root, fromPanelId)?.group.id ?? null;
+      addFiles([url]);
+      updateLayout((tree) => openPanels(tree, from, edge, [newPanel(url, tool)]));
+    }
+    setHovered(url);
+    setTimeout(() => hovered() === url && setHovered(null), 900);
+  }
+
+  // a generated .k is read only (it's stored whole, which keeps big ones
+  // fast); this makes a plain-text copy beside it to edit by hand
+  async function editableCopy(panel) {
+    const doc = (await repo.find(panel.url)).doc();
+    const stem = (doc?.name ?? "pattern.k").replace(/\.k$/, "");
+    const copy = await createFile(`${stem}-copy.k`, {
+      content: docText(doc),
+      knitoutCopyOf: panel.url,
+    });
+    reveal(copy, panel.id, "right", "editor");
+  }
+
+  function panelOf(toolElement) {
+    for (const [id, host] of hosts) if (host.el === toolElement) return id;
+    return null;
+  }
+
   const toolContext = {
     repo,
+    open: (url, toolElement, edge) => reveal(url, panelOf(toolElement), edge),
+    editableCopy: (url, toolElement) => editableCopy({ id: panelOf(toolElement), url }),
     get events() {
       return root;
     },
@@ -277,9 +331,7 @@ export default function KnitoutFrameTool(handle, element) {
     for (const url of urls) {
       try {
         const doc = (await repo.find(url)).doc();
-        const tools = toolsFor(fileExtension(doc));
-        if (tools.length) panels.push(newPanel(url, tools[0].id));
-        else refused.push(doc?.name || shortUrl(url));
+        panels.push(newPanel(url, toolsFor(fileExtension(doc))[0].id));
       } catch {
         refused.push(shortUrl(url));
       }
@@ -289,22 +341,22 @@ export default function KnitoutFrameTool(handle, element) {
       updateLayout((tree) => openPanels(tree, groupId, zone, panels));
     }
     if (refused.length) {
-      notify(groupId, `only .js and .k files open here, not ${refused.join(", ")}`);
+      notify(groupId, `couldn't find ${refused.join(", ")}`);
     }
   }
 
-  async function newPattern(groupId) {
+  // a .js and the .k it writes, side by side on a row of their own
+  async function newPattern() {
     const k = await createFile("pattern.k");
     const js = await createFile("pattern.knitout.js", {
       content: defaultSource,
       knitoutTarget: k,
     });
-    const jsPanel = newPanel(js, "editor");
-    updateLayout((tree) => {
-      tree = openPanels(tree, groupId, "center", [jsPanel]);
-      const beside = findPanel(tree, jsPanel.id).group.id;
-      return openPanels(tree, beside, "right", [newPanel(k, "visualizer")]);
-    });
+    const row = newSplit("row", [
+      newGroup([newPanel(js, "editor")]),
+      newGroup([newPanel(k, "visualizer")]),
+    ]);
+    updateLayout((tree) => addRow(tree, row));
     const [{ runInto }, jsHandle, kHandle] = await Promise.all([
       import("./run.js"),
       repo.find(js),
@@ -351,24 +403,47 @@ export default function KnitoutFrameTool(handle, element) {
   // ── dragging tabs and docs ─────────────────────────────────────────────
 
   const [dragging, setDragging] = createSignal(false);
+  // dropping along the frame's own edge splits the whole layout, so a row
+  // can run all the way across (a .k and its visualizer above everything)
+  const [outerZone, setOuterZone] = createSignal(null);
+
+  function outerEdgeAt(event) {
+    if (!layout.root) return null;
+    const rect = root.getBoundingClientRect();
+    if (event.clientX - rect.left < OUTER_EDGE) return "left";
+    if (rect.right - event.clientX < OUTER_EDGE) return "right";
+    if (event.clientY - rect.top < OUTER_EDGE) return "top";
+    if (rect.bottom - event.clientY < OUTER_EDGE) return "bottom";
+    return null;
+  }
 
   function onRootDragEnter(event) {
     if (isOurDrag(event.dataTransfer)) setDragging(true);
   }
   function onRootDragLeave(event) {
-    if (!root.contains(event.relatedTarget)) setDragging(false);
+    if (!root.contains(event.relatedTarget)) stopDragging();
   }
-  const stopDragging = () => setDragging(false);
+  function stopDragging() {
+    setDragging(false);
+    setOuterZone(null);
+  }
   document.addEventListener("dragend", stopDragging);
   document.addEventListener("drop", stopDragging);
 
   function drop(event, groupId, zone, activePanel) {
     event.preventDefault();
-    setDragging(false);
+    stopDragging();
     const dataTransfer = event.dataTransfer;
     const panelId = dataTransfer.getData(PANEL_TYPE);
     if (panelId) {
       updateLayout((tree) => movePanel(tree, panelId, groupId, zone));
+      return;
+    }
+    const tool = dataTransfer.getData(TOOL_TYPE);
+    if (tool) {
+      const { url, id } = JSON.parse(tool);
+      const at = zone === "code" ? "center" : zone;
+      updateLayout((tree) => openPanels(tree, groupId, at, [newPanel(url, id)]));
       return;
     }
     const docs = droppedDocs(dataTransfer);
@@ -470,18 +545,31 @@ export default function KnitoutFrameTool(handle, element) {
     function onDragOver(event) {
       if (!isOurDrag(event.dataTransfer)) return;
       event.preventDefault();
-      const isPanel = event.dataTransfer.types.includes(PANEL_TYPE);
+      const isPanel = LAYOUT_TYPES.some((type) => event.dataTransfer.types.includes(type));
+      const types = event.dataTransfer.types;
+      event.dataTransfer.dropEffect = types.includes(PANEL_TYPE)
+        ? "move"
+        : types.includes(TOOL_TYPE)
+          ? "copy"
+          : "link";
+      const outer = outerEdgeAt(event);
+      setOuterZone(outer);
+      if (outer) {
+        setZone(null);
+        return;
+      }
       const onTabs = tabs.contains(event.target);
       const rect = body.getBoundingClientRect();
-      let next = onTabs ? "center" : zoneAt(event, rect);
+      // over code that docs can be imported into, most of it is for that
+      const into = isPanel ? null : hosts.get(active()?.id)?.el.dropInto;
+      let next = onTabs ? "center" : zoneAt(event, rect, into ? CODE_EDGE : undefined);
       let line = null;
-      if (next === "center" && !isPanel && !onTabs) {
-        line = hosts.get(active()?.id)?.el.dropInto?.lineAt(event.clientX, event.clientY);
+      if (next === "center" && into && !onTabs) {
+        line = into.lineAt(event.clientX, event.clientY);
         if (line) next = "code";
       }
       setZone(next);
       setCodeLine(line ? line.top - rect.top : null);
-      event.dataTransfer.dropEffect = isPanel ? "move" : "link";
     }
 
     function onDragLeave(event) {
@@ -490,8 +578,10 @@ export default function KnitoutFrameTool(handle, element) {
 
     function onDrop(event) {
       const at = zone() ?? "center";
+      const outer = outerZone();
       setZone(null);
-      drop(event, group.id, at, active());
+      if (outer) drop(event, layout.root.id, outer);
+      else drop(event, group.id, at, active());
     }
 
     return html`<section
@@ -506,7 +596,7 @@ export default function KnitoutFrameTool(handle, element) {
         <//>
         <button
           class="knitoutjs-add"
-          title="open or make a file"
+          title="open a file here, or start a new pattern"
           onClick=${(event) => openMenu(event, group.id)}
         >
           +
@@ -523,7 +613,8 @@ export default function KnitoutFrameTool(handle, element) {
             hidden=${() => active() !== panel}
             data-colour=${() => docColour(panel.url)}
             data-glow=${() => glow(panel.url)}
-            ...${hoverProps(panel.url)}
+            onPointerEnter=${() => setHovered(panel.url)}
+          onPointerLeave=${unhover}
           >
             <${Slot} panel=${panel} />
           </div>`}
@@ -572,13 +663,14 @@ export default function KnitoutFrameTool(handle, element) {
       aria-selected=${() => String(props.active)}
       data-colour=${() => docColour(panel.url)}
       data-glow=${() => glow(panel.url)}
-      title=${() => `${info.name} · ${panel.url}`}
+      title=${() => `${info.name}\ndrag to move it, or onto a pane's edge to split it\ndouble click the name to rename`}
       onClick=${() => updateLayout((tree) => activate(tree, group.id, panel.id))}
       onDragStart=${(event) => {
         event.dataTransfer.setData(PANEL_TYPE, panel.id);
         event.dataTransfer.effectAllowed = "move";
       }}
-      ...${hoverProps(panel.url)}
+      onPointerEnter=${() => setHovered(panel.url)}
+          onPointerLeave=${unhover}
     >
       <span class="knitoutjs-swatch"></span>
       ${() =>
@@ -631,32 +723,62 @@ export default function KnitoutFrameTool(handle, element) {
         data-colour=${() => docColour(panel.url)}
         title=${() => `${panel.url} (click to copy)`}
         onClick=${copy}
-        ...${hoverProps(panel.url)}
+        onPointerEnter=${() => setHovered(panel.url)}
+          onPointerLeave=${unhover}
       >
-        ${() => (copied() ? "copied" : panel.url)}
+        ${() => (copied() ? "copied" : shortUrl(panel.url))}
       </button>
       ${() =>
-        info.source &&
-        html`<span
+        info.copyOf &&
+        html`<button
           class="knitoutjs-link"
-          data-colour=${docColour(info.source)}
-          ...${hoverProps(info.source)}
+          title="open the .k this is a copy of"
+          onClick=${() => reveal(info.copyOf, panel.id, "left")}
+          data-colour=${docColour(info.copyOf)}
+          onPointerEnter=${() => setHovered(info.copyOf)}
+          onPointerLeave=${unhover}
         >
-          written by
+          copy of
+          <span class="knitoutjs-swatch"></span>
+          <span class="knitoutjs-link-name">${() => docInfo(info.copyOf).name}</span>
+        </button>`}
+      ${() =>
+        info.source &&
+        html`<button
+          class="knitoutjs-link"
+          title="open the .js that wrote this"
+          onClick=${() => reveal(info.source, panel.id, "left")}
+          data-colour=${docColour(info.source)}
+          data-stale=${() => (docInfo(info.source).target === panel.url ? undefined : "")}
+          onPointerEnter=${() => setHovered(info.source)}
+          onPointerLeave=${unhover}
+        >
+          ${() => (docInfo(info.source).target === panel.url ? "written by" : "last written by")}
           <span class="knitoutjs-swatch"></span>
           <span class="knitoutjs-link-name">${() => docInfo(info.source).name}</span>
-        </span>`}
+        </button>`}
       <span class="knitoutjs-spacer"></span>
-      <div class="knitoutjs-switch" role="group">
-        <${For} each=${() => toolsFor(info.extension)}>
-          ${(tool) => html`<button
-            aria-pressed=${() => String(panel.tool === tool.id)}
-            onClick=${() => updateLayout((tree) => setTool(tree, panel.id, tool.id))}
+      <${Show} when=${() => toolsFor(info.extension).length > 1}>
+        <div class="knitoutjs-switch" role="group">
+          <${For}
+            each=${() =>
+              toolsFor(info.extension).sort((a, b) => a.position - b.position)}
           >
-            ${tool.name}
-          </button>`}
-        <//>
-      </div>
+            ${(tool) => html`<button
+              title=${`${tool.title}\nclick to switch this pane, or drag it to a tab bar or a pane's edge to open it there too`}
+              draggable="true"
+              aria-pressed=${() => String(panel.tool === tool.id)}
+              onClick=${() => updateLayout((tree) => setTool(tree, panel.id, tool.id))}
+              onDragStart=${(event) => {
+                event.dataTransfer.setData(TOOL_TYPE, JSON.stringify({ url: panel.url, id: tool.id }));
+                event.dataTransfer.effectAllowed = "copy";
+              }}
+            >
+              ${tool.name}
+            </button>`}
+          <//>
+        </div>
+      <//>
     </div>`;
   }
 
@@ -672,9 +794,9 @@ export default function KnitoutFrameTool(handle, element) {
     >
       <div class="knitoutjs-empty-card">
         <h2 class="knitoutjs-rough">nothing's open</h2>
-        <p>drag a .js or .k file in from the sidebar, or</p>
+        <p>drag a .js, a .k, or anything else in from the sidebar, or</p>
         <div class="knitoutjs-empty-actions">
-          <button class="knitoutjs-button" onClick=${() => newPattern(null)}>
+          <button class="knitoutjs-button" onClick=${() => newPattern()}>
             new pattern
           </button>
           <button class="knitoutjs-button" onClick=${(event) => openMenu(event, null)}>
@@ -709,14 +831,15 @@ export default function KnitoutFrameTool(handle, element) {
       ${item(".k file", "", fromMenu((groupId) => newFile(groupId, "untitled.k")))}
       <div class="knitoutjs-menu-heading">in this project</div>
       <${For}
-        each=${() => projectFiles().filter((file) => canOpen(file.extension))}
+        each=${() => projectFiles()}
         fallback=${html`<div class="knitoutjs-menu-empty">nothing yet</div>`}
       >
         ${(file) => html`<button
           class="knitoutjs-menu-item knitoutjs-menu-file"
           data-colour=${docColour(file.url)}
           onClick=${fromMenu((groupId) => openDocs([file.url], groupId))}
-          ...${hoverProps(file.url)}
+          onPointerEnter=${() => setHovered(file.url)}
+          onPointerLeave=${unhover}
         >
           <span class="knitoutjs-swatch"></span>
           ${file.name}
@@ -730,7 +853,7 @@ export default function KnitoutFrameTool(handle, element) {
           onInput=${(event) => event.currentTarget.setCustomValidity("")}
         />
       </form>
-      <p class="knitoutjs-menu-hint">or drag a .js or .k in from the sidebar</p>
+      <p class="knitoutjs-menu-hint">or drag anything in from the sidebar</p>
     </div>`;
   }
 
@@ -759,6 +882,9 @@ export default function KnitoutFrameTool(handle, element) {
           onDragLeave=${onRootDragLeave}
         >
           ${() => (layout.root ? html`<${Node} node=${layout.root} />` : html`<${Empty} />`)}
+          <${Show} when=${outerZone}>
+            <div class="knitoutjs-outer-hint" data-zone=${outerZone}></div>
+          <//>
           <${Menu} />
         </div>`,
     element,

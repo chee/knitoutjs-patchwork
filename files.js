@@ -16,30 +16,40 @@ export function fileExtension(doc) {
   return match ? match[1].toLowerCase() : "";
 }
 
-// the first tool that fits a file is the one it opens in
+// the first tool that fits a file is the one it opens in. anything that
+// isn't a .js or .k shows in a patchwork view
 export const TOOLS = {
   visualizer: {
     id: "visualizer",
     name: "view",
+    title: "draw the stitches this .k makes",
+    // where it sits in a pane's edit | view switch
+    position: 2,
     extensions: ["k"],
     load: () => import("./visualizer.js"),
   },
   editor: {
     id: "editor",
     name: "edit",
+    title: "see the file's text (and change it, if it isn't generated)",
+    position: 1,
     extensions: ["js", "k"],
     load: () => import("./editor.js"),
+  },
+  patchwork: {
+    id: "patchwork",
+    name: "patchwork",
+    title: "show this doc with patchwork's own tool for it",
+    extensions: ["*"],
+    load: () => import("./patchwork-pane.js"),
   },
 };
 
 export function toolsFor(extension) {
-  return Object.values(TOOLS).filter((tool) =>
+  const tools = Object.values(TOOLS).filter((tool) =>
     tool.extensions.includes(extension),
   );
-}
-
-export function canOpen(extension) {
-  return toolsFor(extension).length > 0;
+  return tools.length ? tools : [TOOLS.patchwork];
 }
 
 // each doc gets a colour of its own, so every pane showing it wears the same

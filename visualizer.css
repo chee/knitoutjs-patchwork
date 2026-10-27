@@ -49,6 +49,33 @@
 	}
 }
 
+/* what the stitch under the pointer is, or how to find out */
+.knitout-visualizer-stitch,
+.knitout-visualizer-hint {
+	position: absolute;
+	bottom: 6px;
+	left: 6px;
+	max-width: calc(100% - 12px);
+	padding: 2px 7px;
+	overflow: hidden;
+	border-radius: var(--knitoutjs-radius, 3px);
+	background: color-mix(in oklab, var(--knitoutjs-sheet, #fff) 88%, transparent);
+	color: var(--knitoutjs-ink, inherit);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.knitout-visualizer-hint {
+	color: var(--knitoutjs-muted, #777);
+}
+
+[hidden].knitout-visualizer-stitch,
+[hidden].knitout-visualizer-hint {
+	display: none;
+}
+
 .knitout-visualizer-empty {
 	position: absolute;
 	inset: 0;
@@ -65,8 +92,8 @@
 	bottom: 0;
 	left: 0;
 	padding: 4px 8px;
-	border-top: 1px solid var(--knitoutjs-cherry, #ff2284);
-	background: color-mix(in oklab, var(--knitoutjs-cherry, #ff2284) 12%, var(--knitoutjs-sheet, #fff));
+	border-top: 1px solid var(--knitoutjs-danger, var(--studio-danger, #d33a4c));
+	background: color-mix(in oklab, var(--knitoutjs-danger, var(--studio-danger, #d33a4c)) 12%, var(--knitoutjs-sheet, #fff));
 	font: 11px var(--knitoutjs-mono, ui-monospace, monospace);
 	white-space: pre-wrap;
 }

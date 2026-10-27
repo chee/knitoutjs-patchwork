@@ -1,92 +1,17 @@
 import { createSignal, createMemo, For, Show, onCleanup } from "solid-js";
 import { render } from "solid-js/web";
 import html from "solid-js/html";
-import {
-  EditorState,
-  EditorView,
-  keymap,
-  lineNumbers,
-  highlightActiveLine,
-  highlightActiveLineGutter,
-  highlightSpecialChars,
-  drawSelection,
-  dropCursor,
-  rectangularSelection,
-  crosshairCursor,
-  defaultKeymap,
-  history,
-  historyKeymap,
-  indentWithTab,
-  HighlightStyle,
-  syntaxHighlighting,
-  indentOnInput,
-  bracketMatching,
-  searchKeymap,
-  highlightSelectionMatches,
-  closeBrackets,
-  closeBracketsKeymap,
-  javascript,
-  tags,
-  automergeSyncPlugin,
-} from "./vendor/codemirror.js";
-import { knitoutEditorIntegration } from "./cm-knitout.js";
-import { docText, fileExtension, docColour } from "./files.js";
+import { Prec } from "@codemirror/state";
+import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
+import { knitoutEditorIntegration, showError } from "./cm-knitout.js";
+import { fileExtension, docColour } from "./files.js";
 import { runInto } from "./run.js";
 
 const AUTO_RUN_DELAY = 600;
 
-// the colours are frame.css tokens, so the editor follows the theme
-const theme = EditorView.theme({
-  "&": {
-    height: "100%",
-    backgroundColor: "var(--knitoutjs-sheet)",
-    color: "var(--knitoutjs-ink)",
-  },
-  ".cm-scroller": {
-    fontFamily: "var(--knitoutjs-mono)",
-    lineHeight: "1.55",
-  },
-  ".cm-gutters": {
-    backgroundColor: "var(--knitoutjs-sheet)",
-    borderRight: "1px solid var(--knitoutjs-line-soft)",
-    color: "var(--knitoutjs-muted)",
-  },
-  ".cm-activeLine, .cm-activeLineGutter": {
-    backgroundColor: "var(--knitoutjs-highlighter)",
-  },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection":
-    { backgroundColor: "var(--knitoutjs-selection)" },
-  ".cm-cursor": {
-    borderLeft: "2px solid var(--knitoutjs-cherry)",
-  },
-  "&.cm-focused": { outline: "none" },
-});
-
-const highlight = HighlightStyle.define([
-  {
-    tag: [tags.keyword, tags.controlKeyword],
-    color: "var(--knitoutjs-cherry-ink)",
-  },
-  {
-    tag: [tags.string, tags.special(tags.string)],
-    color: "var(--knitoutjs-stem-ink)",
-  },
-  {
-    tag: [tags.number, tags.bool, tags.null],
-    color: "var(--knitoutjs-blue-ink)",
-  },
-  {
-    tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
-    color: "var(--knitoutjs-lilac-ink)",
-  },
-  { tag: tags.definition(tags.variableName), fontWeight: "600" },
-  {
-    tag: tags.comment,
-    color: "var(--knitoutjs-muted)",
-    fontFamily: "var(--knitoutjs-serif)",
-    fontStyle: "italic",
-  },
-]);
+// patchwork's file tool asks for extra CodeMirror extensions with this event,
+// just before it makes its editor (see base/file's README)
+const EXTENSIONS_EVENT = "file:codemirror-extensions";
 
 // "2x2 rib.knitout.js" → _2x2Rib
 function identifierFor(name) {
@@ -106,84 +31,93 @@ function identifierFor(name) {
 }
 
 /**
- * a text editor for the .js and .k files in a knitout project.
+ * the .js and .k files of a knitout project, in patchwork's own file editor
+ * (a <patchwork-view tool-id="file">), with the knitout bits added to it.
  *
  * context:
  * - repo
  * - events: where visualizer events arrive and selection highlights go
  * - project: { files() → [{url, name, extension}], createFile(name) → url }
  * - hover(url | null): light up the panes showing a doc
+ * - open(url, element, edge): show a doc beside this one (or bring it forward)
+ * - editableCopy(url, element): copy a generated .k as text you can edit
  *
  * a .js file gets a run bar: it writes its knitout into a .k file. docs
  * dropped onto its code become imports (the frame asks `element.dropInto`)
  */
 export default function KnitoutEditorTool(handle, element, context) {
-  const { repo, events, project, hover } = context;
+  const { repo, events, project, hover, open, editableCopy } = context;
   const isJs = fileExtension(handle.doc()) === "js";
-  const editable = typeof handle.doc()?.content === "string";
 
-  let view;
+  let view = null;
   let run;
 
-  function mount(parent) {
-    view = new EditorView({
-      parent,
-      state: EditorState.create({
-        doc: docText(handle.doc()),
-        extensions: [
-          lineNumbers(),
-          highlightActiveLineGutter(),
-          highlightSpecialChars(),
-          history(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          syntaxHighlighting(highlight),
-          bracketMatching(),
-          closeBrackets(),
-          rectangularSelection(),
-          crosshairCursor(),
-          highlightActiveLine(),
-          highlightSelectionMatches(),
-          keymap.of([
-            ...(run
-              ? [{ key: "Mod-Enter", run: () => (run.now(), true) }]
-              : []),
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...searchKeymap,
-            ...historyKeymap,
-            indentWithTab,
-          ]),
-          theme,
-          isJs ? javascript() : [],
-          editable
-            ? automergeSyncPlugin({ handle, path: ["content"] })
-            : EditorState.readOnly.of(true),
-          knitoutEditorIntegration({
-            events,
-            url: handle.url,
-            onSelectLines: (detail) =>
-              events.dispatchEvent(
-                new CustomEvent("knitout:highlight-lines", { detail }),
-              ),
-          }),
-        ],
+  // the file tool's editor, once it's made
+  const holdView = ViewPlugin.define((made) => {
+    view = made;
+    return {
+      destroy() {
+        if (view === made) view = null;
+      },
+    };
+  });
+
+  function onExtensions(event) {
+    const { handle: fileHandle, extensions } = event.detail;
+    if (fileHandle?.url !== handle.url) return;
+    extensions.push(
+      holdView,
+      knitoutEditorIntegration({
+        events,
+        url: handle.url,
+        onSelectLines: (detail) =>
+          events.dispatchEvent(
+            new CustomEvent("knitout:highlight-lines", { detail }),
+          ),
       }),
-    });
+    );
+    if (run) {
+      extensions.push(
+        Prec.high(keymap.of([{ key: "Mod-Enter", run: () => (run.now(), true) }])),
+      );
+    }
   }
+  element.addEventListener(EXTENSIONS_EVENT, onExtensions);
 
   // run the pattern into its target .k: by hand, or after every pause in
-  // typing when auto is on. auto always starts off
+  // typing when autorun is on. autorun is remembered in this browser, for each
+  // .js (not in the doc, so two people don't both autorun into one .k)
   function createRunner() {
     const [target, setTarget] = createSignal(handle.doc()?.knitoutTarget);
-    const [auto, setAuto] = createSignal(false);
+    const autorunKey = `knitoutjs:autorun:${handle.url}`;
+    const [auto, setAutoSignal] = createSignal(readAutorun());
+
+    function readAutorun() {
+      try {
+        return localStorage.getItem(autorunKey) === "on";
+      } catch {
+        return false;
+      }
+    }
+
+    function setAuto(on) {
+      setAutoSignal(on);
+      try {
+        if (on) localStorage.setItem(autorunKey, "on");
+        else localStorage.removeItem(autorunKey);
+      } catch {}
+    }
     const [status, setStatus] = createSignal({ state: "idle" });
+    const running = () => status().state === "running";
     let timer;
+    let current;
 
     const onChange = () => {
       setTarget(handle.doc()?.knitoutTarget);
+      // an error is about the code as it was; once that changes, it's gone
+      if (status().state === "error" && status().line != null) {
+        setStatus({ state: "idle" });
+      }
       if (auto()) {
         clearTimeout(timer);
         timer = setTimeout(now, AUTO_RUN_DELAY);
@@ -192,23 +126,47 @@ export default function KnitoutEditorTool(handle, element, context) {
     handle.on("change", onChange);
     onCleanup(() => {
       clearTimeout(timer);
+      current?.abort();
       handle.off("change", onChange);
     });
 
-    async function now() {
+    // a new run takes over from one still going. a generated .k is read
+    // only; a .k with editable text in it (someone's copy, or one typed by
+    // hand) isn't written over without asking
+    async function now({ overwrite = false } = {}) {
       const url = target();
       if (!url) {
         setStatus({ state: "error", message: "pick a .k file to write to" });
         return;
       }
-      setStatus({ state: "running" });
-      const result = await runInto(handle, await repo.find(url), repo);
-      if (result.error) {
+      const kHandle = await repo.find(url);
+      const content = kHandle.doc()?.content;
+      if (typeof content === "string" && content.trim() && !overwrite) {
         setStatus({
-          state: "error",
-          message: String(result.error.message ?? result.error),
+          state: "ask",
+          message: `${kHandle.doc()?.name ?? "the .k"} has editable text in it`,
         });
+        return;
+      }
+      current?.abort();
+      const run = (current = new AbortController());
+      setStatus({ state: "running" });
+      const result = await runInto(handle, kHandle, repo, {
+        signal: run.signal,
+      });
+      if (current !== run) return;
+      current = null;
+      if (result.error?.stopped) {
+        setStatus({ state: "idle", message: "stopped" });
+      } else if (result.error) {
+        const error = {
+          line: result.error.line ?? null,
+          message: String(result.error.message ?? result.error),
+        };
+        setStatus({ state: "error", ...error });
+        if (view && error.line != null) showError(view, error);
       } else {
+        if (view) showError(view, null);
         const lines = result.knitout.split("\n").length;
         setStatus({
           state: "ok",
@@ -231,7 +189,39 @@ export default function KnitoutEditorTool(handle, element, context) {
       pickTarget(await project.createFile(base + ".k"));
     }
 
-    return { target, auto, setAuto, status, now, pickTarget, newTarget };
+    function stop() {
+      current?.abort();
+    }
+
+    function goToLine(lineNumber) {
+      if (!view) return;
+      const line = view.state.doc.line(
+        Math.max(1, Math.min(lineNumber, view.state.doc.lines)),
+      );
+      view.dispatch({
+        selection: { anchor: line.from },
+        effects: EditorView.scrollIntoView(line.from, { y: "center" }),
+      });
+      view.focus();
+    }
+
+    function keep() {
+      setStatus({ state: "idle", message: "kept it as it is" });
+    }
+
+    return {
+      target,
+      auto,
+      setAuto,
+      status,
+      running,
+      now,
+      stop,
+      keep,
+      goToLine,
+      pickTarget,
+      newTarget,
+    };
   }
 
   function RunBar() {
@@ -253,27 +243,57 @@ export default function KnitoutEditorTool(handle, element, context) {
     return html`<div class="knitoutjs-runbar">
       <button
         class="knitoutjs-button knitoutjs-run"
-        title="run (⌘↵)"
-        onClick=${() => run.now()}
+        data-running=${() => (run.running() ? "" : undefined)}
+        title=${() =>
+          run.running()
+            ? "stop this run"
+            : "run the pattern: it writes its knitout into the .k file chosen on the right (⌘↵)"}
+        onClick=${() => (run.running() ? run.stop() : run.now())}
       >
-        run
+        ${() => (run.running() ? "stop" : "run")}
       </button>
-      <label class="knitoutjs-auto">
+      <label
+        class="knitoutjs-auto"
+        title="run again by itself whenever you stop typing for a moment. this browser remembers it for this file"
+      >
         <input
           type="checkbox"
           checked=${run.auto}
           onChange=${(event) => run.setAuto(event.currentTarget.checked)}
         />
-        auto
+        autorun
       </label>
       <span class="knitoutjs-status" data-state=${() => run.status().state}>
+        <${Show} when=${() => run.status().line != null}>
+          <button
+            class="knitoutjs-error-line"
+            title="go to this line"
+            onClick=${() => run.goToLine(run.status().line)}
+          >
+            line ${() => run.status().line}:
+          </button>
+        <//>
         ${() =>
           run.status().state === "running"
             ? "running…"
             : (run.status().message ?? "")}
       </span>
+      <${Show} when=${() => run.status().state === "ask"}>
+        <span class="knitoutjs-ask">
+          <button
+            class="knitoutjs-button"
+            onClick=${() => run.now({ overwrite: true })}
+          >
+            overwrite it
+          </button>
+          <button class="knitoutjs-button" onClick=${() => run.keep()}>
+            keep it
+          </button>
+        </span>
+      <//>
       <label
         class="knitoutjs-target"
+        title="the .k file this pattern writes its knitout (the machine's instructions) into"
         data-colour=${targetColour}
         onPointerEnter=${() => hover(run.target())}
         onPointerLeave=${() => hover(null)}
@@ -296,25 +316,59 @@ export default function KnitoutEditorTool(handle, element, context) {
           <option value="+new">new .k file…</option>
         </select>
       </label>
+      <button
+        class="knitoutjs-open"
+        title="show that .k file beside this one"
+        disabled=${() => !run.target()}
+        onClick=${() => open(run.target(), element, "right")}
+      >
+        open
+      </button>
     </div>`;
+  }
+
+  // a .k that a .js wrote is stored whole, so it's read only here
+  function ReadOnlyNote() {
+    const [doc, setDoc] = createSignal(handle.doc());
+    const onChange = () => setDoc(handle.doc());
+    handle.on("change", onChange);
+    onCleanup(() => handle.off("change", onChange));
+    const writer = () =>
+      project.files().find((file) => file.url === doc()?.knitoutSource)?.name;
+    return html`<${Show}
+      when=${() => !isJs && doc() && typeof doc().content !== "string"}
+    >
+      <div class="knitoutjs-readonly">
+        <span>
+          read only: ${() => writer() ?? "a pattern"} writes this file each
+          time it runs
+        </span>
+        <button
+          class="knitoutjs-button"
+          title="make a copy of this .k as text you can change by hand"
+          onClick=${() => editableCopy(handle.url, element)}
+        >
+          make an editable copy
+        </button>
+      </div>
+    <//>`;
   }
 
   const dispose = render(() => {
     run = isJs ? createRunner() : null;
     return html`<div class="knitoutjs-editor">
       <${Show} when=${isJs}><${RunBar} /><//>
-      <${Show} when=${!editable}>
-        <div class="knitoutjs-note">
-          read only: this file's text is saved as a fixed snapshot
-        </div>
-      <//>
-      <div class="knitoutjs-codemirror" ref=${mount}></div>
+      <${ReadOnlyNote} />
+      <repo-provider class="knitoutjs-file" ref=${(el) => (el.repo = repo)}>
+        <patchwork-view attr:doc-url=${handle.url} tool-id="file"></patchwork-view>
+      </repo-provider>
     </div>`;
   }, element);
 
   // dropping docs onto the code writes a line above the one under the pointer:
   // a .js comes in with `await import`, anything else with `await repo.find`
   function lineAt(x, y) {
+    if (!view) return null;
     const line = view.state.doc.lineAt(view.posAtCoords({ x, y }, false));
     return {
       line: line.number,
@@ -323,11 +377,13 @@ export default function KnitoutEditorTool(handle, element, context) {
   }
 
   async function drop(docs, x, y) {
-    const at = view.state.doc.line(lineAt(x, y).line).from;
+    const under = lineAt(x, y);
+    if (!under) return;
+    const at = view.state.doc.line(under.line).from;
     const lines = await Promise.all(
       docs.map(async ({ url, name }) => {
         const doc = (await repo.find(url)).doc();
-        const id = identifierFor(name ?? doc?.name ?? "doc");
+        const id = identifierFor(name ?? doc?.name ?? doc?.title ?? "doc");
         return fileExtension(doc) === "js"
           ? `const ${id} = await import("/${url}")\n`
           : `const ${id} = await repo.find("${url}")\n`;
@@ -341,7 +397,7 @@ export default function KnitoutEditorTool(handle, element, context) {
 
   return () => {
     delete element.dropInto;
-    view?.destroy();
+    element.removeEventListener(EXTENSIONS_EVENT, onExtensions);
     dispose();
   };
 }

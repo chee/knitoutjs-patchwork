@@ -9,12 +9,19 @@ const SHOW_FRONT = { front:1.0, back:0.0 };
 const SHOW_BACK = { front:0.0, back:1.0 };
 const SHOW_BOTH = { front:1.0, back:0.5 };
 
+//patchwork: this also runs in a worker drawing on an OffscreenCanvas, where
+//there's no window or document (and maybe no requestAnimationFrame)
+const frame = globalThis.requestAnimationFrame
+	? (callback) => globalThis.requestAnimationFrame(callback)
+	: (callback) => setTimeout(() => callback(performance.now()), 16);
+
 function nextFrame() {
 	return new Promise(function(resolve) {
-		requestAnimationFrame(function() { setTimeout(resolve, 0); });
+		frame(function() { setTimeout(resolve, 0); });
 	});
 }
 function setLoading(on, text) {
+	if (typeof document === 'undefined') return;
 	const el = document.getElementById('loading-spinner');
 	if (!el) return;
 	if (on) el.style.display = 'block';
@@ -25,10 +32,17 @@ function setLoading(on, text) {
 //make a canvas into a knitout visualizer:
 function ShowKnitout(canvas) {
 	canvas.showKnitout = this;
-	canvas.tabIndex = 0;
+	if ('tabIndex' in canvas) canvas.tabIndex = 0;
 
 	this.canvas = canvas;
 	this.ctx = canvas.getContext('2d');
+
+	//patchwork: where the canvas sits and its pixel ratio. a worker drawing on
+	//an OffscreenCanvas replaces this with the size the page tells it
+	this.viewport = function() {
+		const rect = canvas.getBoundingClientRect();
+		return { left:rect.left, top:rect.top, width:rect.width, height:rect.height, dpr:window.devicePixelRatio };
+	};
 
 	//these are used to do stitch selection and view panning:
 	this.clearDrawing();
@@ -51,7 +65,7 @@ function ShowKnitout(canvas) {
 	const me = this;
 	canvas.addEventListener('mousemove', function(evt){
 		evt.preventDefault();
-		var rect = canvas.getBoundingClientRect();
+		var rect = me.viewport();
 		let oldX = me.mouse.x;
 		let oldY = me.mouse.y;
 		me.mouse.x = ( (evt.clientX - rect.left) / rect.width * canvas.width );
@@ -147,7 +161,7 @@ function ShowKnitout(canvas) {
 	});
 
 	canvas.addEventListener('mouseover', function(evt){
-		canvas.focus();
+		if (canvas.focus) canvas.focus();
 		return false;
 	});
 }
@@ -171,9 +185,9 @@ ShowKnitout.prototype.setHighlightFn = function ShowKnitout_setHighlightFn(highl
 };
 
 ShowKnitout.prototype.setCurrentTransform = function ShowKnitout_setCurrentTransform() {
-	let rect = this.canvas.getBoundingClientRect();
-	const w = Math.round(rect.width * window.devicePixelRatio);
-	const h = Math.round(rect.height * window.devicePixelRatio);
+	let rect = this.viewport();
+	const w = Math.round(rect.width * rect.dpr);
+	const h = Math.round(rect.height * rect.dpr);
 
 	const scale = Math.min(w,h) / (2.0 * this.camera.radius);
 
@@ -181,9 +195,9 @@ ShowKnitout.prototype.setCurrentTransform = function ShowKnitout_setCurrentTrans
 };
 
 ShowKnitout.prototype.draw = function ShowKnitout_draw() {
-	let rect = this.canvas.getBoundingClientRect();
-	const w = Math.round(rect.width * window.devicePixelRatio);
-	const h = Math.round(rect.height * window.devicePixelRatio);
+	let rect = this.viewport();
+	const w = Math.round(rect.width * rect.dpr);
+	const h = Math.round(rect.height * rect.dpr);
 
 	this.canvas.width = w;
 	this.canvas.height = h;
@@ -296,9 +310,9 @@ ShowKnitout.prototype.draw = function ShowKnitout_draw() {
 	if (oldHovered !== this.hovered) {
 		if (this.onHoverSource) {
 			if (this.hovered && this.hovered.tile.source) {
-				this.onHoverSource(this.hovered.tile.source);
+				this.onHoverSource(this.hovered.tile.source, this.describeHovered());
 			} else {
-				this.onHoverSource();
+				this.onHoverSource(undefined, this.describeHovered());
 			}
 		}
 	}
@@ -376,11 +390,36 @@ ShowKnitout.prototype.draw = function ShowKnitout_draw() {
 
 };
 
+//patchwork: what's under the pointer, as plain data: which bed, row and
+//needle, and what the machine did there. grid columns are 2 * needle number;
+//the odd ones in between are the yarn running from needle to needle
+ShowKnitout.prototype.describeHovered = function ShowKnitout_describeHovered() {
+	if (!this.hovered) return null;
+	const tile = this.hovered.tile;
+	const index = this.minIndex + this.hovered.col;
+	const yarns = [];
+	for (const port of ['+', '-', 'v']) {
+		for (const yarn of (tile.ports && tile.ports[port]) || []) {
+			const name = typeof yarn === 'string' ? yarn : (yarn && (yarn.name || yarn.cn)) || String(yarn);
+			if (yarns.indexOf(name) === -1) yarns.push(name);
+		}
+	}
+	return {
+		bed: this.hovered.bed,
+		row: this.hovered.row + 1,
+		needle: index % 2 === 0 ? index / 2 : null,
+		between: index % 2 === 0 ? null : [(index - 1) / 2, (index + 1) / 2],
+		type: tile.type || null,
+		dir: tile.dir || null,
+		yarns: yarns,
+	};
+};
+
 ShowKnitout.prototype.requestDraw = function ShowKnitout_requestDraw() {
 	if (this.drawRequested) return;
 	this.drawRequested = true;
 	let me = this;
-	window.requestAnimationFrame(function(){
+	frame(function(){
 		delete me.drawRequested;
 		me.draw();
 	});
@@ -491,6 +530,7 @@ ShowKnitout.prototype.parse = async function ShowKnitout_parse(codeText, useKnit
 		if (minIndex > maxIndex) return;
 
 
+		this.minIndex = minIndex;
 		this.min = TileSet.tileLowerLeft(minIndex, 0);
 		this.max = TileSet.tileLowerLeft(maxIndex + 1, machine.topRow + 1);
 

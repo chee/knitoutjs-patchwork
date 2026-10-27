@@ -2,36 +2,40 @@
    stem, blue) with a touch of Mimi Reyburn (cream sheets, a serif drawn a
    little by hand). follows the patchwork theme through --studio-* */
 
+/* everything you see is the patchwork theme's own colours: its chrome for
+   the gutters and tab bars, its editor fill for the sheets, its primary for
+   the one button that does something, its selection for highlights. the
+   chee rabbits are the docs' own colours (one each, on swatches and glows),
+   leaning a quarter towards the theme's colour for the same job */
 :root,
 :host,
 [theme] {
-	--knitoutjs-lemon: #ffff88;
-	--knitoutjs-cherry: #ff2284;
-	--knitoutjs-stem: #40dcba;
-	--knitoutjs-blue: #2269ff;
-	--knitoutjs-lilac: #9879e8;
-	--knitoutjs-peach: #ff9a6a;
-	--knitoutjs-butter: #fdca40;
-
-	/* the same hues, deep enough to read as text */
-	--knitoutjs-cherry-ink: light-dark(#d1166b, #ff6fae);
-	--knitoutjs-stem-ink: light-dark(#18936b, #4fd4a4);
-	--knitoutjs-blue-ink: light-dark(#2269ff, #6f9bff);
-	--knitoutjs-lilac-ink: light-dark(#5a3fa6, #b29bf2);
-
 	--knitoutjs-ink: var(--studio-line, #1c1a17);
-	--knitoutjs-muted: color-mix(in oklab, var(--knitoutjs-ink) 55%, transparent);
-	--knitoutjs-line: var(--knitoutjs-ink);
-	--knitoutjs-line-soft: color-mix(in oklab, var(--knitoutjs-ink) 16%, transparent);
+	--knitoutjs-fill: var(--studio-fill, #fffdf5);
+	--knitoutjs-muted: var(--studio-line-offset-50, color-mix(in oklab, var(--knitoutjs-ink) 55%, transparent));
+	--knitoutjs-line: var(--studio-chrome-line, var(--knitoutjs-ink));
+	--knitoutjs-line-soft: var(--studio-fill-offset-20, color-mix(in oklab, var(--knitoutjs-ink) 16%, transparent));
 
-	/* the page is lemon; what you work on sits on cream sheets */
-	--knitoutjs-paper: color-mix(in oklab, var(--studio-fill, #fffdf5), light-dark(#ffff88, #2a2700) 30%);
-	--knitoutjs-chrome: color-mix(in oklab, var(--studio-fill, #fffdf5), light-dark(#ffff88, #2a2700) 55%);
-	--knitoutjs-sheet: color-mix(in oklab, var(--editor-fill, var(--studio-fill, #fff)), light-dark(#fdfaf2, #1d1a12) 50%);
-	--knitoutjs-highlighter: light-dark(#ffff8870, #ffff8814);
-	--knitoutjs-selection: light-dark(#36f9c070, #36f9c040);
+	--knitoutjs-paper: var(--studio-chrome-fill, var(--knitoutjs-fill));
+	--knitoutjs-chrome: var(--studio-chrome-fill-offset-20, var(--knitoutjs-paper));
+	--knitoutjs-chrome-hover: var(--studio-chrome-fill-offset-30, var(--knitoutjs-chrome));
+	--knitoutjs-chrome-ink: var(--studio-chrome-line, var(--knitoutjs-ink));
+	--knitoutjs-sheet: var(--editor-fill, var(--text-editor-fill, var(--knitoutjs-fill)));
+	--knitoutjs-highlighter: var(--studio-selection-fill, #ffee8888);
+	--knitoutjs-accent: var(--studio-primary-fill, var(--studio-primary, #ff2284));
+	--knitoutjs-accent-ink: var(--studio-primary-line, #fff);
+	--knitoutjs-danger: var(--studio-danger-text, var(--studio-danger, #d33a4c));
 
-	--knitoutjs-sans: "Jost", var(--studio-family-ui, ui-sans-serif), system-ui, sans-serif;
+	/* the docs' colours */
+	--knitoutjs-cherry: color-mix(in oklab, #ff2284 75%, var(--studio-primary, #ff2284));
+	--knitoutjs-stem: color-mix(in oklab, #40dcba 75%, var(--studio-added, #40dcba));
+	--knitoutjs-blue: color-mix(in oklab, #2269ff 75%, var(--studio-link, var(--studio-secondary, #2269ff)));
+	--knitoutjs-lilac: color-mix(in oklab, #9879e8 75%, var(--studio-secondary, #9879e8));
+	--knitoutjs-peach: color-mix(in oklab, #ff9a6a 75%, var(--studio-warning, #ff9a6a));
+	--knitoutjs-butter: color-mix(in oklab, #fdca40 75%, var(--studio-warning, #fdca40));
+
+	--knitoutjs-radius: var(--studio-radius-sm, 3px);
+	--knitoutjs-sans: var(--studio-family-ui, var(--studio-family-sans, "Jost", ui-sans-serif, system-ui, sans-serif));
 	--knitoutjs-serif: "Fraunces", "Iowan Old Style", Palatino, Georgia, serif;
 	--knitoutjs-mono: var(--studio-family-code, Monaco, ui-monospace, monospace);
 }
@@ -140,7 +144,7 @@
 
 	&:hover::after,
 	&:active::after {
-		background: var(--knitoutjs-cherry);
+		background: var(--knitoutjs-accent);
 	}
 }
 
@@ -153,8 +157,7 @@
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	border: 1px solid var(--knitoutjs-line);
-	border-radius: 3px;
+	border-radius: var(--knitoutjs-radius);
 	background: var(--knitoutjs-sheet);
 }
 
@@ -166,6 +169,7 @@
 	scrollbar-width: none;
 	background: var(--knitoutjs-chrome);
 	border-bottom: 1px solid var(--knitoutjs-line);
+	color: var(--knitoutjs-chrome-ink);
 }
 
 .knitoutjs-tab {
@@ -213,8 +217,8 @@
 .knitoutjs-tag {
 	padding: 0 4px;
 	border: 1px solid var(--knitoutjs-line);
-	background: var(--knitoutjs-lemon);
-	color: #1c1a17;
+	background: var(--knitoutjs-highlighter);
+	color: var(--knitoutjs-ink);
 	font: 10px/14px var(--knitoutjs-mono);
 	transform: skewX(-10deg);
 }
@@ -247,8 +251,8 @@
 	cursor: pointer;
 
 	&:hover {
-		background: var(--knitoutjs-lemon);
-		color: #1c1a17;
+		background: var(--knitoutjs-highlighter);
+		color: var(--knitoutjs-ink);
 	}
 }
 
@@ -261,7 +265,7 @@
 	transition: box-shadow 0.15s;
 
 	[data-glow] > & {
-		box-shadow: 0 0 0 2px color-mix(in oklab, var(--doc) 40%, transparent), 0 0 8px 1px var(--doc);
+		box-shadow: 0 0 0 2px color-mix(in oklab, var(--doc) 35%, transparent);
 	}
 }
 
@@ -270,6 +274,7 @@
 .knitoutjs-bar {
 	display: flex;
 	flex: none;
+	overflow: hidden;
 	align-items: center;
 	gap: 10px;
 	height: 24px;
@@ -279,8 +284,7 @@
 }
 
 .knitoutjs-url {
-	min-width: 0;
-	max-width: 34ch;
+	flex: none;
 	padding: 0;
 	overflow: hidden;
 	border: none;
@@ -303,8 +307,24 @@
 	align-items: center;
 	gap: 5px;
 	min-width: 0;
+	overflow: hidden;
+	padding: 0;
+	border: none;
+	background: none;
 	color: var(--knitoutjs-muted);
+	font: inherit;
 	white-space: nowrap;
+	cursor: pointer;
+
+	&:hover .knitoutjs-link-name {
+		text-decoration: underline 2px var(--doc);
+		text-underline-offset: 3px;
+	}
+
+	/* that .js writes somewhere else now */
+	&[data-stale] {
+		opacity: 0.55;
+	}
 }
 
 .knitoutjs-link-name {
@@ -380,14 +400,13 @@
 	/* showing the doc you're pointing at */
 	&[data-glow="same"]::after {
 		box-shadow:
-			inset 0 0 0 2px var(--doc),
-			inset 0 0 28px color-mix(in oklab, var(--doc) 38%, transparent);
+			inset 0 0 0 1.5px var(--doc),
+			inset 0 0 10px color-mix(in oklab, var(--doc) 14%, transparent);
 	}
 
 	/* showing a doc linked to it: the .js that writes it, the .k it writes */
 	&[data-glow="linked"]::after {
-		box-shadow: inset 0 0 18px color-mix(in oklab, var(--doc) 22%, transparent);
-		outline-color: var(--doc);
+		outline-color: color-mix(in oklab, var(--doc) 70%, transparent);
 	}
 }
 
@@ -401,7 +420,7 @@
 
 .knitoutjs-tool-broken {
 	padding: 12px;
-	color: var(--knitoutjs-cherry-ink);
+	color: var(--knitoutjs-danger);
 }
 
 /* ── dropping things in ───────────────────────────────────────────────── */
@@ -415,9 +434,9 @@
 .knitoutjs-drop-hint {
 	position: absolute;
 	inset: 4px;
-	border: 2px dashed var(--knitoutjs-blue);
+	border: 2px dashed var(--knitoutjs-accent);
 	border-radius: 3px;
-	background: color-mix(in oklab, var(--knitoutjs-blue) 12%, transparent);
+	background: color-mix(in oklab, var(--knitoutjs-accent) 12%, transparent);
 	transition: inset 0.08s;
 	pointer-events: none;
 
@@ -431,11 +450,25 @@
 	&[data-zone="bottom"] { inset: 50% 4px 4px 4px; }
 }
 
+.knitoutjs-outer-hint {
+	position: absolute;
+	z-index: 20;
+	border: 2px dashed var(--knitoutjs-accent);
+	border-radius: 3px;
+	background: color-mix(in oklab, var(--knitoutjs-accent) 10%, transparent);
+	pointer-events: none;
+
+	&[data-zone="left"] { inset: 4px 66% 4px 4px; }
+	&[data-zone="right"] { inset: 4px 4px 4px 66%; }
+	&[data-zone="top"] { inset: 4px 4px 66% 4px; }
+	&[data-zone="bottom"] { inset: 66% 4px 4px 4px; }
+}
+
 .knitoutjs-drop-line {
 	position: absolute;
 	right: 0;
 	left: 0;
-	border-top: 2px solid var(--knitoutjs-cherry);
+	border-top: 2px solid var(--knitoutjs-accent);
 	pointer-events: none;
 
 	& span {
@@ -444,8 +477,8 @@
 		right: 8px;
 		padding: 0 5px;
 		border: 1px solid var(--knitoutjs-line);
-		background: var(--knitoutjs-lemon);
-		color: #1c1a17;
+		background: var(--knitoutjs-highlighter);
+		color: var(--knitoutjs-ink);
 		font: 10px/14px var(--knitoutjs-mono);
 		transform: skewX(-10deg);
 	}
@@ -460,9 +493,9 @@
 	padding: 5px 9px;
 	border: 1px solid var(--knitoutjs-line);
 	border-radius: 2px;
-	background: var(--knitoutjs-lemon);
+	background: var(--knitoutjs-highlighter);
 	box-shadow: 1px 1px 0 var(--knitoutjs-line);
-	color: #1c1a17;
+	color: var(--knitoutjs-ink);
 }
 
 /* ── buttons: a 1px line and a 1px shadow, lifting on hover ───────────── */
@@ -498,10 +531,19 @@
 	min-height: 0;
 }
 
-.knitoutjs-codemirror {
+/* patchwork's own file editor, inside */
+.knitoutjs-file {
+	display: flex;
 	flex: 1 1 0;
 	min-height: 0;
-	overflow: hidden;
+
+	& > patchwork-view {
+		display: flex;
+		flex: 1 1 0;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
 }
 
 .knitoutjs-runbar {
@@ -515,10 +557,16 @@
 }
 
 .knitoutjs-run {
+	min-width: 5em;
 	padding: 1px 12px;
-	background: var(--knitoutjs-cherry);
-	color: #fff;
+	background: var(--knitoutjs-accent);
+	color: var(--knitoutjs-accent-ink);
 	font-weight: 600;
+
+	&[data-running] {
+		background: var(--knitoutjs-ink);
+		color: var(--knitoutjs-sheet);
+	}
 }
 
 .knitoutjs-auto {
@@ -529,7 +577,7 @@
 
 	& input {
 		margin: 0;
-		accent-color: var(--knitoutjs-stem-ink);
+		accent-color: var(--studio-added, var(--knitoutjs-stem));
 	}
 }
 
@@ -542,10 +590,11 @@
 	white-space: nowrap;
 
 	&[data-state="ok"] {
-		color: var(--knitoutjs-stem-ink);
+		color: var(--studio-added, var(--knitoutjs-stem));
 	}
-	&[data-state="error"] {
-		color: var(--knitoutjs-cherry-ink);
+	&[data-state="error"],
+	&[data-state="ask"] {
+		color: var(--knitoutjs-danger);
 	}
 }
 
@@ -566,17 +615,68 @@
 	}
 }
 
-.knitoutjs-target-label {
+.knitoutjs-open {
+	flex: none;
+	padding: 0 2px;
+	border: none;
+	background: none;
 	color: var(--knitoutjs-muted);
+	font: inherit;
+	cursor: pointer;
+
+	&:hover:not(:disabled) {
+		color: var(--knitoutjs-ink);
+		text-decoration: underline;
+	}
 }
 
-.knitoutjs-note {
+.knitoutjs-ask {
+	display: inline-flex;
 	flex: none;
+	gap: 6px;
+
+	& .knitoutjs-button {
+		padding: 0 8px;
+	}
+}
+
+.knitoutjs-error-line {
+	padding: 0;
+	border: none;
+	background: none;
+	color: inherit;
+	font: inherit;
+	font-weight: 600;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+
+.knitoutjs-readonly {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 10px;
 	padding: 4px 8px;
 	border-bottom: 1px solid var(--knitoutjs-line-soft);
 	background: var(--knitoutjs-highlighter);
 	font-size: 11px;
+
+	& span {
+		flex: 1;
+		min-width: 0;
+	}
+
+	& .knitoutjs-button {
+		flex: none;
+		padding: 0 8px;
+	}
 }
+
+.knitoutjs-target-label {
+	color: var(--knitoutjs-muted);
+}
+
 
 /* ── nothing open ─────────────────────────────────────────────────────── */
 
@@ -609,7 +709,7 @@
 
 .knitoutjs-empty-notice {
 	margin: 12px 0 0 !important;
-	color: var(--knitoutjs-cherry-ink) !important;
+	color: var(--knitoutjs-danger) !important;
 }
 
 /* the serif is drawn by hand, a little; it wobbles while you're near */
@@ -679,8 +779,8 @@
 	}
 
 	&:hover {
-		background: var(--knitoutjs-lemon);
-		color: #1c1a17;
+		background: var(--knitoutjs-highlighter);
+		color: var(--knitoutjs-ink);
 	}
 }
 

@@ -1,10 +1,5 @@
-import {
-	StateEffect,
-	StateField,
-	EditorView,
-	Decoration,
-	ViewPlugin,
-} from "./vendor/codemirror.js"
+import {StateEffect, StateField} from "@codemirror/state"
+import {EditorView, Decoration, ViewPlugin} from "@codemirror/view"
 
 const setHoverLine = StateEffect.define()
 
@@ -37,7 +32,56 @@ const hoverLineField = StateField.define({
 	provide: field => EditorView.decorations.from(field),
 })
 
+// the line a run failed on, until the code changes
+const setErrorLine = StateEffect.define()
+
+const errorLineField = StateField.define({
+	create() {
+		return Decoration.none
+	},
+	update(decorations, tr) {
+		if (tr.docChanged) decorations = Decoration.none
+		for (const effect of tr.effects) {
+			if (!effect.is(setErrorLine)) continue
+			if (effect.value == null) {
+				decorations = Decoration.none
+			} else {
+				const lineNumber = Math.max(1, Math.min(effect.value.line, tr.state.doc.lines))
+				const line = tr.state.doc.line(lineNumber)
+				decorations = Decoration.set([
+					Decoration.line({
+						class: "cm-knitout-error-line",
+						attributes: {title: effect.value.message},
+					}).range(line.from),
+				])
+			}
+		}
+		return decorations
+	},
+	provide: field => EditorView.decorations.from(field),
+})
+
+/**
+ * mark the line a run failed on ({line, message}), or clear it (null). it
+ * clears itself when the code changes
+ */
+export function showError(view, error) {
+	const effects = [setErrorLine.of(error)]
+	if (error) {
+		const lineNumber = Math.max(1, Math.min(error.line, view.state.doc.lines))
+		effects.push(
+			EditorView.scrollIntoView(view.state.doc.line(lineNumber).from, {y: "nearest"}),
+		)
+	}
+	view.dispatch({effects})
+}
+
 const knitoutTheme = EditorView.baseTheme({
+	".cm-knitout-error-line": {
+		backgroundColor:
+			"color-mix(in oklab, var(--studio-danger, #d33a4c) 14%, transparent)",
+		boxShadow: "inset 3px 0 0 var(--studio-danger, #d33a4c)",
+	},
 	".cm-knitout-hover-line": {
 		backgroundColor: "rgba(255, 220, 0, 0.25)",
 	},
@@ -51,8 +95,9 @@ const knitoutTheme = EditorView.baseTheme({
  *
  * options:
  * - events: an element the visualizers' knitout:* events reach (e.g. the
- *   frame's root element). each event says which file it means in
- *   `detail.url`; only the ones for `url` move this editor
+ *   frame's root element). each event says which files and lines it means,
+ *   as `detail.at` ([{url, line}]) or just `detail.url` and `detail.line`;
+ *   only the line for `url` moves this editor
  * - url: the automerge url of the file this editor shows
  * - onSelectLines: ({url, start, end}) => void, called with 1-based inclusive
  *   line numbers whenever the editor selection changes — forward this to the
@@ -65,24 +110,55 @@ export function knitoutEditorIntegration({events, url, onSelectLines}) {
 			return view.state.doc.line(clamped)
 		}
 
+		// the line in this editor's file, if the event has one ({url, line},
+		// or several in `at`)
+		function lineFor(detail) {
+			const at = detail?.at ?? [detail]
+			return at.find(entry => entry?.url === url)?.line ?? null
+		}
+
+		// pointing at a stitch scrolls its line into view; pointing away puts
+		// the editor back where it was, unless the stitch was clicked
+		let scrolledFrom = null
+
 		function onHover(event) {
-			if (event.detail?.url !== url) {
+			const lineNumber = lineFor(event.detail)
+			if (lineNumber == null) {
 				view.dispatch({effects: setHoverLine.of(null)})
+				if (scrolledFrom) {
+					view.scrollDOM.scrollTop = scrolledFrom.top
+					view.scrollDOM.scrollLeft = scrolledFrom.left
+					scrolledFrom = null
+				}
 				return
 			}
-			const lineNumber = event.detail?.line
+			scrolledFrom ??= {
+				top: view.scrollDOM.scrollTop,
+				left: view.scrollDOM.scrollLeft,
+			}
 			view.dispatch({
-				effects: setHoverLine.of(lineNumber ?? null),
+				effects: [
+					setHoverLine.of(lineNumber),
+					EditorView.scrollIntoView(lineAt(lineNumber).from, {
+						y: "nearest",
+						yMargin: 48,
+					}),
+				],
 			})
 		}
 
-		// double click on a stitch: jump to the line that made it
-		// (single click is left alone because dragging pans the canvas)
+		// a click on a stitch: stay at its line
+		function onSelect(event) {
+			if (lineFor(event.detail) != null) scrolledFrom = null
+		}
+
+		// double click on a stitch: jump to the line that made it, and put the
+		// cursor there
 		function onGoto(event) {
-			if (event.detail?.url !== url) return
-			const lineNumber = event.detail?.line
+			const lineNumber = lineFor(event.detail)
 			if (lineNumber == null) return
 			const line = lineAt(lineNumber)
+			scrolledFrom = null
 			view.dispatch({
 				selection: {anchor: line.from},
 				effects: EditorView.scrollIntoView(line.from, {y: "center"}),
@@ -91,6 +167,7 @@ export function knitoutEditorIntegration({events, url, onSelectLines}) {
 		}
 
 		events.addEventListener("knitout:hover-source", onHover)
+		events.addEventListener("knitout:select-source", onSelect)
 		events.addEventListener("knitout:goto-source", onGoto)
 
 		return {
@@ -106,10 +183,11 @@ export function knitoutEditorIntegration({events, url, onSelectLines}) {
 			},
 			destroy() {
 				events.removeEventListener("knitout:hover-source", onHover)
+				events.removeEventListener("knitout:select-source", onSelect)
 				events.removeEventListener("knitout:goto-source", onGoto)
 			},
 		}
 	})
 
-	return [plugin, hoverLineField, knitoutTheme]
+	return [plugin, hoverLineField, errorLineField, knitoutTheme]
 }

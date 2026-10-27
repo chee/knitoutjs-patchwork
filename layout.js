@@ -70,6 +70,20 @@ export function findPanel(node, panelId) {
   return null;
 }
 
+// the first panel showing `url`: {group, index}
+export function findPanelShowing(node, url) {
+  if (!node) return null;
+  if (node.type === "group") {
+    const index = node.panels.findIndex((panel) => panel.url === url);
+    return index === -1 ? null : { group: node, index };
+  }
+  for (const child of node.children) {
+    const found = findPanelShowing(child, url);
+    if (found) return found;
+  }
+  return null;
+}
+
 function scaleTo100(sizes) {
   const total = sizes.reduce((sum, size) => sum + size, 0) || 1;
   return sizes.map((size) => (size / total) * 100);
@@ -114,8 +128,9 @@ export function removePanel(root, panelId) {
   return normalize(root);
 }
 
-// put a new group beside the group `targetId`, on one of its edges
-function insertGroup(root, targetId, edge, group) {
+// put a node (a new group, or a whole row) beside the node `targetId`, on
+// one of its edges
+export function placeBeside(root, targetId, edge, group) {
   const direction = edge === "left" || edge === "right" ? "row" : "column";
   const before = edge === "left" || edge === "top";
   const target = findNode(root, targetId);
@@ -124,9 +139,13 @@ function insertGroup(root, targetId, edge, group) {
   if (root.id === targetId) return newSplit(direction, pair);
   const { parent, index } = findParent(root, targetId);
   if (parent.direction === direction) {
-    const half = parent.sizes[index] / 2;
-    parent.sizes.splice(index, 1, half, half);
-    parent.children.splice(before ? index : index + 1, 0, group);
+    // an even share for the new one, taken from everyone in the row (or
+    // column), so no pane gets squeezed down to nothing
+    const share = 100 / (parent.children.length + 1);
+    parent.sizes = parent.sizes.map((size) => (size * (100 - share)) / 100);
+    const at = before ? index : index + 1;
+    parent.sizes.splice(at, 0, share);
+    parent.children.splice(at, 0, group);
   } else {
     parent.children[index] = newSplit(direction, pair);
   }
@@ -148,7 +167,7 @@ export function openPanels(root, groupId, zone, panels) {
     target.active = panels[0].id;
     return root;
   }
-  return insertGroup(root, groupId, zone, newGroup(panels));
+  return placeBeside(root, groupId, zone, newGroup(panels));
 }
 
 export function movePanel(root, panelId, groupId, zone) {
@@ -177,4 +196,18 @@ export function activate(root, groupId, panelId) {
   const group = findNode(root, groupId);
   if (group) group.active = panelId;
   return root;
+}
+
+// add a node as a full-width row under everything, with an even share of the
+// height (a layout that's already a column of rows makes room for one more)
+export function addRow(root, node) {
+  if (!root) return node;
+  if (root.type === "split" && root.direction === "column") {
+    const share = 100 / (root.children.length + 1);
+    root.sizes = root.sizes.map((size) => (size * (100 - share)) / 100);
+    root.sizes.push(share);
+    root.children.push(node);
+    return root;
+  }
+  return newSplit("column", [root, node]);
 }
