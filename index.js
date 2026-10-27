@@ -57,7 +57,7 @@ export const plugins = [
   },
   {
     type: "patchwork:tool",
-    id: "knitout-visualizer",
+    id: "knitoutjs-panes-visualizer",
     name: "Knitout Visualizer",
     icon: "Grid3x3",
     supportedDatatypes: ["file"],
