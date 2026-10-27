@@ -1,104 +1,106 @@
-.knitout-visualizer {
-	position: relative;
-	flex: 1 1 auto;
-	width: 100%;
-	height: 100%;
-	min-width: 0;
-	min-height: 0;
-	overflow: hidden;
-	background: var(--knitoutjs-sheet, var(--studio-fill, #fffdf5));
-	color: var(--knitoutjs-ink, var(--studio-line, #1c1a17));
-	font: 12px var(--knitoutjs-sans, system-ui, sans-serif);
-
-	& canvas {
-		position: absolute;
-		inset: 0;
+.knitoutjs-editor-tool {
+	&.knitout-visualizer {
+		position: relative;
+		flex: 1 1 auto;
 		width: 100%;
 		height: 100%;
-		outline: none;
-	}
-}
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+		background: var(--knitoutjs-sheet, var(--studio-fill, #fffdf5));
+		color: var(--knitoutjs-ink, var(--studio-line, #1c1a17));
+		font: 12px var(--knitoutjs-sans, system-ui, sans-serif);
 
-.knitout-visualizer-actions {
-	position: absolute;
-	top: 6px;
-	right: 6px;
-	display: flex;
-	gap: 4px;
-}
-
-/* chee.party buttons: a 1px line and a 1px shadow, lifting on hover */
-.knitout-button {
-	padding: 2px 8px;
-	border: 1px solid var(--knitoutjs-line, currentColor);
-	border-radius: 2px;
-	background: var(--knitoutjs-sheet, var(--studio-fill, #fff));
-	box-shadow: 1px 1px 0 var(--knitoutjs-line, currentColor);
-	color: inherit;
-	font: inherit;
-	cursor: pointer;
-
-	&:hover {
-		translate: -1px -1px;
-		box-shadow: 2px 2px 0 var(--knitoutjs-line, currentColor);
+		& canvas {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			outline: none;
+		}
 	}
 
-	&:active {
-		translate: 1px 1px;
-		box-shadow: none;
+	& .knitout-visualizer-actions {
+		position: absolute;
+		top: 6px;
+		right: 6px;
+		display: flex;
+		gap: 4px;
 	}
-}
 
-/* what the stitch under the pointer is, or how to find out */
-.knitout-visualizer-stitch,
-.knitout-visualizer-hint {
-	position: absolute;
-	bottom: 6px;
-	left: 6px;
-	max-width: calc(100% - 12px);
-	padding: 2px 7px;
-	overflow: hidden;
-	border-radius: var(--knitoutjs-radius, 3px);
-	background: color-mix(in oklab, var(--knitoutjs-sheet, #fff) 88%, transparent);
-	color: var(--knitoutjs-ink, inherit);
-	font-size: 11px;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	pointer-events: none;
-}
+	/* chee.party buttons: a 1px line and a 1px shadow, lifting on hover */
+	& .knitout-button {
+		padding: 2px 8px;
+		border: 1px solid var(--knitoutjs-line, currentColor);
+		border-radius: 2px;
+		background: var(--knitoutjs-sheet, var(--studio-fill, #fff));
+		box-shadow: 1px 1px 0 var(--knitoutjs-line, currentColor);
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
 
-.knitout-visualizer-hint {
-	color: var(--knitoutjs-muted, #777);
-}
+		&:hover {
+			translate: -1px -1px;
+			box-shadow: 2px 2px 0 var(--knitoutjs-line, currentColor);
+		}
 
-[hidden].knitout-visualizer-stitch,
-[hidden].knitout-visualizer-hint {
-	display: none;
-}
+		&:active {
+			translate: 1px 1px;
+			box-shadow: none;
+		}
+	}
 
-.knitout-visualizer-empty {
-	position: absolute;
-	inset: 0;
-	display: grid;
-	place-items: center;
-	color: var(--knitoutjs-muted, #8a857c);
-	font: italic 15px var(--knitoutjs-serif, Georgia, serif);
-	pointer-events: none;
-}
+	/* what the stitch under the pointer is, or how to find out */
+	& .knitout-visualizer-stitch,
+	& .knitout-visualizer-hint {
+		position: absolute;
+		bottom: 6px;
+		left: 6px;
+		max-width: calc(100% - 12px);
+		padding: 2px 7px;
+		overflow: hidden;
+		border-radius: var(--knitoutjs-radius, 3px);
+		background: color-mix(in oklab, var(--knitoutjs-sheet, #fff) 88%, transparent);
+		color: var(--knitoutjs-ink, inherit);
+		font-size: 11px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		pointer-events: none;
+	}
 
-.knitout-visualizer-error {
-	position: absolute;
-	right: 0;
-	bottom: 0;
-	left: 0;
-	padding: 4px 8px;
-	border-top: 1px solid var(--knitoutjs-danger, var(--studio-danger, #d33a4c));
-	background: color-mix(in oklab, var(--knitoutjs-danger, var(--studio-danger, #d33a4c)) 12%, var(--knitoutjs-sheet, #fff));
-	font: 11px var(--knitoutjs-mono, ui-monospace, monospace);
-	white-space: pre-wrap;
-}
+	& .knitout-visualizer-hint {
+		color: var(--knitoutjs-muted, #777);
+	}
 
-[hidden].knitout-visualizer-empty,
-[hidden].knitout-visualizer-error {
-	display: none;
+	& [hidden].knitout-visualizer-stitch,
+	& [hidden].knitout-visualizer-hint {
+		display: none;
+	}
+
+	& .knitout-visualizer-empty {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		color: var(--knitoutjs-muted, #8a857c);
+		font: italic 15px var(--knitoutjs-serif, Georgia, serif);
+		pointer-events: none;
+	}
+
+	& .knitout-visualizer-error {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		padding: 4px 8px;
+		border-top: 1px solid var(--knitoutjs-danger, var(--studio-danger, #d33a4c));
+		background: color-mix(in oklab, var(--knitoutjs-danger, var(--studio-danger, #d33a4c)) 12%, var(--knitoutjs-sheet, #fff));
+		font: 11px var(--knitoutjs-mono, ui-monospace, monospace);
+		white-space: pre-wrap;
+	}
+
+	& [hidden].knitout-visualizer-empty,
+	& [hidden].knitout-visualizer-error {
+		display: none;
+	}
 }

@@ -182,7 +182,7 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 	element.appendChild(link)
 
 	const root = document.createElement("div")
-	root.className = "knitout-visualizer"
+	root.className = "knitoutjs-editor-tool knitout-visualizer"
 	element.appendChild(root)
 
 	let canvas = document.createElement("canvas")

@@ -1,10 +1,10 @@
-import { createSignal, createMemo, For, Show, onCleanup } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { render } from "solid-js/web";
 import html from "solid-js/html";
 import { Prec } from "@codemirror/state";
-import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
+import { EditorView, keymap, ViewPlugin } from "@codemirror/view";
 import { knitoutEditorIntegration, showError } from "./cm-knitout.js";
-import { fileExtension, docColour } from "./files.js";
+import { docColour, fileExtension } from "./files.js";
 import { runInto } from "./run.js";
 
 const AUTO_RUN_DELAY = 600;
@@ -19,14 +19,13 @@ function identifierFor(name) {
     .replace(/\..*$/, "")
     .split(/[^A-Za-z0-9]+/)
     .filter(Boolean);
-  const id =
-    words
-      .map((word, index) =>
-        index
-          ? word[0].toUpperCase() + word.slice(1)
-          : word[0].toLowerCase() + word.slice(1),
-      )
-      .join("") || "doc";
+  const id = words
+    .map((word, index) =>
+      index
+        ? word[0].toUpperCase() + word.slice(1)
+        : word[0].toLowerCase() + word.slice(1)
+    )
+    .join("") || "doc";
   return /^[0-9]/.test(id) ? "_" + id : id;
 }
 
@@ -78,7 +77,9 @@ export default function KnitoutEditorTool(handle, element, context) {
     );
     if (run) {
       extensions.push(
-        Prec.high(keymap.of([{ key: "Mod-Enter", run: () => (run.now(), true) }])),
+        Prec.high(
+          keymap.of([{ key: "Mod-Enter", run: () => (run.now(), true) }]),
+        ),
       );
     }
   }
@@ -170,7 +171,9 @@ export default function KnitoutEditorTool(handle, element, context) {
         const lines = result.knitout.split("\n").length;
         setStatus({
           state: "ok",
-          message: `ran in ${Math.round(result.ms)}ms · ${lines.toLocaleString()} lines`,
+          message: `ran in ${
+            Math.round(result.ms)
+          }ms · ${lines.toLocaleString()} lines`,
         });
       }
     }
@@ -226,7 +229,7 @@ export default function KnitoutEditorTool(handle, element, context) {
 
   function RunBar() {
     const kFiles = createMemo(() =>
-      project.files().filter((file) => file.extension === "k"),
+      project.files().filter((file) => file.extension === "k")
     );
     const targetColour = () => docColour(run.target());
 
@@ -245,9 +248,9 @@ export default function KnitoutEditorTool(handle, element, context) {
         class="knitoutjs-button knitoutjs-run"
         data-running=${() => (run.running() ? "" : undefined)}
         title=${() =>
-          run.running()
-            ? "stop this run"
-            : "run the pattern: it writes its knitout into the .k file chosen on the right (⌘↵)"}
+      run.running()
+        ? "stop this run"
+        : "run the pattern: it writes its knitout into the .k file chosen on the right (⌘↵)"}
         onClick=${() => (run.running() ? run.stop() : run.now())}
       >
         ${() => (run.running() ? "stop" : "run")}
@@ -274,9 +277,9 @@ export default function KnitoutEditorTool(handle, element, context) {
           </button>
         <//>
         ${() =>
-          run.status().state === "running"
-            ? "running…"
-            : (run.status().message ?? "")}
+      run.status().state === "running"
+        ? "running…"
+        : (run.status().message ?? "")}
       </span>
       <${Show} when=${() => run.status().state === "ask"}>
         <span class="knitoutjs-ask">
@@ -306,12 +309,14 @@ export default function KnitoutEditorTool(handle, element, context) {
           </option>
           <${For} each=${kFiles}>
             ${(file) =>
-              html`<option
-                value=${file.url}
-                selected=${() => file.url === run.target()}
-              >
-                ${file.name}
-              </option>`}
+      html`
+        <option
+          value=${file.url}
+          selected=${() => file.url === run.target()}
+        >
+                        ${file.name}
+                      </option>
+      `}
           <//>
           <option value="+new">new .k file…</option>
         </select>
@@ -335,34 +340,40 @@ export default function KnitoutEditorTool(handle, element, context) {
     onCleanup(() => handle.off("change", onChange));
     const writer = () =>
       project.files().find((file) => file.url === doc()?.knitoutSource)?.name;
-    return html`<${Show}
-      when=${() => !isJs && doc() && typeof doc().content !== "string"}
-    >
-      <div class="knitoutjs-readonly">
-        <span>
-          read only: ${() => writer() ?? "a pattern"} writes this file each
-          time it runs
-        </span>
-        <button
-          class="knitoutjs-button"
-          title="make a copy of this .k as text you can change by hand"
-          onClick=${() => editableCopy(handle.url, element)}
-        >
-          make an editable copy
-        </button>
-      </div>
-    <//>`;
+    return html`
+      <${Show}
+        when=${() => !isJs && doc() && typeof doc().content !== "string"}
+      >
+        <div class="knitoutjs-readonly">
+          <span>
+                read only: ${() =>
+                  writer() ?? "a pattern"} writes this file each
+                time it runs
+              </span>
+          <button
+            class="knitoutjs-button"
+            title="make a copy of this .k as text you can change by hand"
+            onClick=${() => editableCopy(handle.url, element)}
+          >
+                make an editable copy
+              </button>
+        </div>
+        <//>
+    `;
   }
 
   const dispose = render(() => {
     run = isJs ? createRunner() : null;
-    return html`<div class="knitoutjs-editor">
-      <${Show} when=${isJs}><${RunBar} /><//>
-      <${ReadOnlyNote} />
-      <repo-provider class="knitoutjs-file" ref=${(el) => (el.repo = repo)}>
-        <patchwork-view attr:doc-url=${handle.url} tool-id="file"></patchwork-view>
-      </repo-provider>
-    </div>`;
+    return html`
+      <div class="knitoutjs-editor">
+        <${Show} when=${isJs}>
+          <${RunBar} />
+          <//>
+          <${ReadOnlyNote} />
+          <patchwork-view attr:doc-url=${handle
+            .url} tool-id="file"></patchwork-view>
+          </div>
+    `;
   }, element);
 
   // dropping docs onto the code writes a line above the one under the pointer:

@@ -417,22 +417,94 @@ export default function KnitoutFrameTool(handle, element) {
     return null;
   }
 
-  function onRootDragEnter(event) {
-    if (isOurDrag(event.dataTransfer)) setDragging(true);
+  // the pane under the pointer while something's dragged over, and where in
+  // it: {groupId, zone, lineTop}. the panes only show this; the frame works
+  // it out, at its root, so nothing inside a pane (an editor, a canvas) can
+  // take the drop first
+  const [dropTarget, setDropTarget] = createSignal(null);
+  const dropTargets = new Map(); // group id → (event) => {zone, lineTop}
+
+  // browsers often leave dragleave's relatedTarget empty, so count instead:
+  // every element entered is left again
+  let entered = 0;
+
+  // the drop effect to answer with, for what's being dragged
+  function dropEffectFor(dataTransfer) {
+    const types = dataTransfer.types;
+    if (types.includes(PANEL_TYPE)) return "move";
+    return "copy";
   }
-  function onRootDragLeave(event) {
-    if (!root.contains(event.relatedTarget)) stopDragging();
+
+  function onRootDragEnter(event) {
+    if (!isOurDrag(event.dataTransfer)) return;
+    // safari only lets an element be dropped on if it cancels dragenter as
+    // well as dragover (as the spec says); chrome only needs dragover
+    event.preventDefault();
+    event.dataTransfer.dropEffect = dropEffectFor(event.dataTransfer);
+    entered++;
+    setDragging(true);
+  }
+  function onRootDragLeave() {
+    if (!dragging()) return;
+    entered = Math.max(0, entered - 1);
+    if (entered === 0) stopDragging();
   }
   function stopDragging() {
+    entered = 0;
     setDragging(false);
     setOuterZone(null);
+    setDropTarget(null);
   }
+  // dragged away somewhere else on the page, or let go of
+  const onDocumentDragOver = (event) => {
+    if (dragging() && !root.contains(event.target)) stopDragging();
+  };
+  document.addEventListener("dragover", onDocumentDragOver);
   document.addEventListener("dragend", stopDragging);
   document.addEventListener("drop", stopDragging);
 
-  function drop(event, groupId, zone, activePanel) {
+  // where a drop would land: the outer edge, a pane and a zone of it, or
+  // (with nothing open) the whole frame
+  function dropTargetAt(event) {
+    const outer = outerEdgeAt(event);
+    if (outer) return { groupId: layout.root.id, zone: outer, outer: true };
+    if (!layout.root) return { groupId: null, zone: "center" };
+    const section = event.target.closest?.(".knitoutjs-group");
+    const zoneFor = section && dropTargets.get(section.dataset.group);
+    return zoneFor ? { groupId: section.dataset.group, ...zoneFor(event) } : null;
+  }
+
+  function onRootDragOver(event) {
+    if (!isOurDrag(event.dataTransfer)) return;
     event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = dropEffectFor(event.dataTransfer);
+    if (!dragging()) setDragging(true);
+    const target = dropTargetAt(event);
+    setOuterZone(target?.outer ? target.zone : null);
+    setDropTarget(target && !target.outer ? target : null);
+  }
+
+  function onRootDrop(event) {
+    if (!isOurDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const target = dropTargetAt(event);
     stopDragging();
+    if (!target) return;
+    const group = target.groupId && findNode(layout.root, target.groupId);
+    const active = group?.panels?.find((panel) => panel.id === group.active) ?? group?.panels?.[0];
+    drop(event, target.groupId, target.zone, active);
+  }
+
+  function listenForDrops(el) {
+    el.addEventListener("dragenter", onRootDragEnter, true);
+    el.addEventListener("dragleave", onRootDragLeave, true);
+    el.addEventListener("dragover", onRootDragOver, true);
+    el.addEventListener("drop", onRootDrop, true);
+  }
+
+  function drop(event, groupId, zone, activePanel) {
     const dataTransfer = event.dataTransfer;
     const panelId = dataTransfer.getData(PANEL_TYPE);
     if (panelId) {
@@ -537,58 +609,37 @@ export default function KnitoutFrameTool(handle, element) {
     const active = createMemo(
       () => group.panels.find((panel) => panel.id === group.active) ?? group.panels[0],
     );
-    const [zone, setZone] = createSignal(null);
-    const [codeLine, setCodeLine] = createSignal(null);
     let tabs;
     let body;
 
-    function onDragOver(event) {
-      if (!isOurDrag(event.dataTransfer)) return;
-      event.preventDefault();
-      const isPanel = LAYOUT_TYPES.some((type) => event.dataTransfer.types.includes(type));
+    // which part of this pane a drag is over: the tab bar (as a tab), a band
+    // along an edge (to split), over .js code (to import), or the middle
+    function zoneFor(event) {
       const types = event.dataTransfer.types;
-      event.dataTransfer.dropEffect = types.includes(PANEL_TYPE)
-        ? "move"
-        : types.includes(TOOL_TYPE)
-          ? "copy"
-          : "link";
-      const outer = outerEdgeAt(event);
-      setOuterZone(outer);
-      if (outer) {
-        setZone(null);
-        return;
-      }
+      const placing = LAYOUT_TYPES.some((type) => types.includes(type));
       const onTabs = tabs.contains(event.target);
       const rect = body.getBoundingClientRect();
       // over code that docs can be imported into, most of it is for that
-      const into = isPanel ? null : hosts.get(active()?.id)?.el.dropInto;
-      let next = onTabs ? "center" : zoneAt(event, rect, into ? CODE_EDGE : undefined);
-      let line = null;
-      if (next === "center" && into && !onTabs) {
-        line = into.lineAt(event.clientX, event.clientY);
-        if (line) next = "code";
+      const into = placing ? null : hosts.get(active()?.id)?.el.dropInto;
+      const zone = onTabs ? "center" : zoneAt(event, rect, into ? CODE_EDGE : undefined);
+      if (zone === "center" && into && !onTabs) {
+        const line = into.lineAt(event.clientX, event.clientY);
+        if (line) return { zone: "code", lineTop: line.top - rect.top };
       }
-      setZone(next);
-      setCodeLine(line ? line.top - rect.top : null);
+      return { zone, lineTop: null };
     }
+    dropTargets.set(group.id, zoneFor);
+    onCleanup(() => {
+      if (dropTargets.get(group.id) === zoneFor) dropTargets.delete(group.id);
+    });
 
-    function onDragLeave(event) {
-      if (!event.currentTarget.contains(event.relatedTarget)) setZone(null);
-    }
-
-    function onDrop(event) {
-      const at = zone() ?? "center";
-      const outer = outerZone();
-      setZone(null);
-      if (outer) drop(event, layout.root.id, outer);
-      else drop(event, group.id, at, active());
-    }
+    const target = () => (dropTarget()?.groupId === group.id ? dropTarget() : null);
+    const zone = () => target()?.zone ?? null;
+    const codeLine = () => target()?.lineTop ?? null;
 
     return html`<section
       class="knitoutjs-group"
-      onDragOver=${onDragOver}
-      onDragLeave=${onDragLeave}
-      onDrop=${onDrop}
+      data-group=${group.id}
     >
       <header class="knitoutjs-tabs" role="tablist" ref=${(el) => (tabs = el)}>
         <${For} each=${() => group.panels}>
@@ -783,15 +834,7 @@ export default function KnitoutFrameTool(handle, element) {
   }
 
   function Empty() {
-    return html`<div
-      class="knitoutjs-empty"
-      onDragOver=${(event) => {
-        if (!isOurDrag(event.dataTransfer)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "link";
-      }}
-      onDrop=${(event) => drop(event, null, "center")}
-    >
+    return html`<div class="knitoutjs-empty">
       <div class="knitoutjs-empty-card">
         <h2 class="knitoutjs-rough">nothing's open</h2>
         <p>drag a .js, a .k, or anything else in from the sidebar, or</p>
@@ -860,27 +903,28 @@ export default function KnitoutFrameTool(handle, element) {
   const dispose = render(
     () =>
       html`<link rel="stylesheet" href=${STYLESHEET} />
-        <svg class="knitoutjs-defs" aria-hidden="true">
-          <filter id="knitoutjs-rough-1">
-            <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="1" />
-            <feDisplacementMap in="SourceGraphic" scale="1.4" />
-          </filter>
-          <filter id="knitoutjs-rough-2">
-            <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="2" />
-            <feDisplacementMap in="SourceGraphic" scale="1.4" />
-          </filter>
-          <filter id="knitoutjs-rough-3">
-            <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="3" />
-            <feDisplacementMap in="SourceGraphic" scale="1.4" />
-          </filter>
-        </svg>
         <div
-          class="knitoutjs-frame"
-          ref=${(el) => (root = el)}
+          class="knitoutjs-editor-tool knitoutjs-frame"
+          ref=${(el) => {
+            root = el;
+            listenForDrops(el);
+          }}
           data-resizing=${resizing}
-          onDragEnter=${onRootDragEnter}
-          onDragLeave=${onRootDragLeave}
         >
+          <svg class="knitoutjs-defs" aria-hidden="true">
+            <filter id="knitoutjs-rough-1">
+              <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="1" />
+              <feDisplacementMap in="SourceGraphic" scale="1.4" />
+            </filter>
+            <filter id="knitoutjs-rough-2">
+              <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="2" />
+              <feDisplacementMap in="SourceGraphic" scale="1.4" />
+            </filter>
+            <filter id="knitoutjs-rough-3">
+              <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="3" />
+              <feDisplacementMap in="SourceGraphic" scale="1.4" />
+            </filter>
+          </svg>
           ${() => (layout.root ? html`<${Node} node=${layout.root} />` : html`<${Empty} />`)}
           <${Show} when=${outerZone}>
             <div class="knitoutjs-outer-hint" data-zone=${outerZone}></div>
@@ -892,6 +936,7 @@ export default function KnitoutFrameTool(handle, element) {
 
   return () => {
     handle.off("change", readDoc);
+    document.removeEventListener("dragover", onDocumentDragOver);
     document.removeEventListener("dragend", stopDragging);
     document.removeEventListener("drop", stopDragging);
     clearTimeout(noticeTimer);
