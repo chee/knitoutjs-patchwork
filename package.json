@@ -1,0 +1,10 @@
+{
+	"name": "@patchwork/knitoutjs-panes",
+	"version": "0.0.2",
+	"type": "module",
+	"main": "./index.js",
+	"scripts": {
+		"push": "pushwork sync",
+		"register": "pw-modules add \"$MODULE_SETTINGS_DOC_URL\" \"$(pushwork url)\""
+	}
+}
