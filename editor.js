@@ -86,8 +86,8 @@ export default function KnitoutEditorTool(handle, element, context) {
   element.addEventListener(EXTENSIONS_EVENT, onExtensions);
 
   // run the pattern into its target .k: by hand, or after every pause in
-  // typing when autorun is on. autorun is remembered in this browser, for each
-  // .js (not in the doc, so two people don't both autorun into one .k)
+  // typing when autorun is on (the default). turning it off is remembered in
+  // this browser, for each .js (not in the doc, so it's each person's choice)
   function createRunner() {
     const [target, setTarget] = createSignal(handle.doc()?.knitoutTarget);
     const autorunKey = `knitoutjs:autorun:${handle.url}`;
@@ -95,17 +95,17 @@ export default function KnitoutEditorTool(handle, element, context) {
 
     function readAutorun() {
       try {
-        return localStorage.getItem(autorunKey) === "on";
+        return localStorage.getItem(autorunKey) !== "off";
       } catch {
-        return false;
+        return true;
       }
     }
 
     function setAuto(on) {
       setAutoSignal(on);
       try {
-        if (on) localStorage.setItem(autorunKey, "on");
-        else localStorage.removeItem(autorunKey);
+        if (on) localStorage.removeItem(autorunKey);
+        else localStorage.setItem(autorunKey, "off");
       } catch {}
     }
     const [status, setStatus] = createSignal({ state: "idle" });
