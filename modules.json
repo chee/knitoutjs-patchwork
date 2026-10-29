@@ -1,0 +1,4 @@
+{
+	"@patchwork": {
+		"type": "patchwork:module-settings"
+	}, "modules": ["./index.js"]}
