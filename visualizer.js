@@ -183,8 +183,12 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 	root.className = "knitoutjs-editor-tool knitout-visualizer"
 	element.appendChild(root)
 
+	// watch the canvas, not root: root can already fill the pane before the
+	// stylesheet loads, while the canvas is still 300x150 until it does
+	const resizeObserver = new ResizeObserver(() => renderer?.resize())
 	let canvas = document.createElement("canvas")
 	root.appendChild(canvas)
+	resizeObserver.observe(canvas)
 
 	const actions = document.createElement("div")
 	actions.className = "knitout-visualizer-actions"
@@ -265,8 +269,10 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 			console.warn("knitout visualizer: drawing on the page instead of a worker:", message)
 			renderer?.destroy()
 			const fresh = document.createElement("canvas")
+			resizeObserver.unobserve(canvas)
 			canvas.replaceWith(fresh)
 			canvas = fresh
+			resizeObserver.observe(canvas)
 			renderer = await pageRenderer(canvas, callbacks)
 			renderer.highlight(lines)
 			firstDraw = true
@@ -349,8 +355,6 @@ export default function KnitoutVisualizerTool(handle, element, context = {}) {
 
 	handle.on("change", scheduleDraw)
 	events.addEventListener("knitout:highlight-lines", onHighlightLines)
-	const resizeObserver = new ResizeObserver(() => renderer?.resize())
-	resizeObserver.observe(root)
 
 	return () => {
 		destroyed = true

@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { render } from "solid-js/web";
 import html from "solid-js/html";
-import { Prec } from "@codemirror/state";
+import { Prec, Transaction } from "@codemirror/state";
 import { EditorView, keymap, ViewPlugin } from "@codemirror/view";
 import { knitoutEditorIntegration, showError } from "./cm-knitout.js";
 import { docColour, fileExtension } from "./files.js";
@@ -80,14 +80,25 @@ export default function KnitoutEditorTool(handle, element, context) {
         Prec.high(
           keymap.of([{ key: "Mod-Enter", run: () => (run.now(), true) }]),
         ),
+        // only your own edits autorun: other people's arrive as transactions
+        // with no user event, and their own editor runs them
+        EditorView.updateListener.of((update) => {
+          if (
+            update.transactions.some((tr) =>
+              tr.docChanged && tr.annotation(Transaction.userEvent)
+            )
+          ) {
+            run.edited();
+          }
+        }),
       );
     }
   }
   element.addEventListener(EXTENSIONS_EVENT, onExtensions);
 
   // run the pattern into its target .k: by hand, or after every pause in
-  // typing when autorun is on (the default). turning it off is remembered in
-  // this browser, for each .js (not in the doc, so it's each person's choice)
+  // your typing when autorun is on (the default). turning it off is remembered
+  // in this browser, for each .js (not in the doc, so it's each person's choice)
   function createRunner() {
     const [target, setTarget] = createSignal(handle.doc()?.knitoutTarget);
     const autorunKey = `knitoutjs:autorun:${handle.url}`;
@@ -119,11 +130,13 @@ export default function KnitoutEditorTool(handle, element, context) {
       if (status().state === "error" && status().line != null) {
         setStatus({ state: "idle" });
       }
-      if (auto()) {
-        clearTimeout(timer);
-        timer = setTimeout(now, AUTO_RUN_DELAY);
-      }
     };
+
+    function edited() {
+      if (!auto()) return;
+      clearTimeout(timer);
+      timer = setTimeout(now, AUTO_RUN_DELAY);
+    }
     handle.on("change", onChange);
     onCleanup(() => {
       clearTimeout(timer);
@@ -219,6 +232,7 @@ export default function KnitoutEditorTool(handle, element, context) {
       status,
       running,
       now,
+      edited,
       stop,
       keep,
       goToLine,
@@ -400,7 +414,10 @@ export default function KnitoutEditorTool(handle, element, context) {
           : `const ${id} = await repo.find("${url}")\n`;
       }),
     );
-    view.dispatch({ changes: { from: at, insert: lines.join("") } });
+    view.dispatch({
+      changes: { from: at, insert: lines.join("") },
+      userEvent: "input.drop",
+    });
     view.focus();
   }
 
