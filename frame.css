@@ -156,7 +156,9 @@
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
-		overflow: hidden;
+		/* clip, not hidden: an editor bringing its cursor into view mustn't
+		   scroll the pane itself and push the tabs off the top */
+		overflow: clip;
 		border-radius: var(--knitoutjs-radius);
 		background: var(--knitoutjs-sheet);
 	}
@@ -188,8 +190,21 @@
 			box-shadow: inset 0 -2px 0 var(--doc);
 		}
 
+		/* its doc is open in another pane too */
+		&[data-shared] {
+			box-shadow: inset 0 -2px 0 var(--doc);
+		}
+
 		&[data-glow="same"] {
 			background: color-mix(in oklab, var(--doc) 16%, var(--knitoutjs-sheet));
+		}
+
+		/* a doc linked to the one you're pointing at: the .js that writes it,
+		   the .k it writes, a copy, as its panes show it */
+		&[data-glow="linked"] {
+			background: color-mix(in oklab, var(--doc) 8%, var(--knitoutjs-sheet));
+			outline: 1px dashed color-mix(in oklab, var(--doc) 70%, transparent);
+			outline-offset: -3px;
 		}
 
 		&:hover .knitoutjs-close,
@@ -213,14 +228,28 @@
 		font: inherit;
 	}
 
-	/* chee.party's tag: lemon, a black line, leaning */
-	& .knitoutjs-tag {
-		padding: 0 4px;
-		border: 1px solid var(--knitoutjs-line);
-		background: var(--knitoutjs-highlighter);
-		color: var(--knitoutjs-ink);
-		font: 10px/14px var(--knitoutjs-mono);
-		transform: skewX(-10deg);
+	/* what the tab's shown with: opens its tool menu */
+	& .knitoutjs-tab-tool {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		gap: 2px;
+		padding: 0 3px;
+		border: none;
+		border-radius: 2px;
+		background: none;
+		color: var(--knitoutjs-muted);
+		font: 10.5px/16px var(--knitoutjs-sans);
+		cursor: pointer;
+
+		& span {
+			font-size: 8px;
+		}
+
+		&:hover {
+			background: var(--knitoutjs-line-soft);
+			color: var(--knitoutjs-ink);
+		}
 	}
 
 	& .knitoutjs-close {
@@ -284,7 +313,10 @@
 	}
 
 	& .knitoutjs-url {
+		display: inline-flex;
 		flex: none;
+		align-items: center;
+		gap: 5px;
 		padding: 0;
 		overflow: hidden;
 		border: none;
@@ -338,32 +370,33 @@
 		flex: 1;
 	}
 
-	& .knitoutjs-switch {
-		display: flex;
+	/* a generated .k: built when, out of date, or its .js failed */
+	& .knitoutjs-build-status {
+		display: inline-flex;
 		flex: none;
+		align-items: center;
+		gap: 4px;
+		color: var(--knitoutjs-muted);
+		white-space: nowrap;
 
-		& button {
-			padding: 0 7px;
-			border: 1px solid var(--knitoutjs-line);
-			background: var(--knitoutjs-sheet);
-			color: inherit;
-			font: 10.5px/16px var(--knitoutjs-sans);
-			cursor: pointer;
-
-			& + button {
-				border-left: none;
-			}
-			&:first-child {
-				border-radius: 2px 0 0 2px;
-			}
-			&:last-child {
-				border-radius: 0 2px 2px 0;
-			}
-			&[aria-pressed="true"] {
-				background: var(--knitoutjs-ink);
-				color: var(--knitoutjs-sheet);
-			}
+		&[data-state="stale"] {
+			color: var(--knitoutjs-ink);
 		}
+		&[data-state="error"] {
+			color: var(--knitoutjs-danger);
+		}
+	}
+
+	& .knitoutjs-rebuild {
+		padding: 0;
+		border: none;
+		background: none;
+		color: inherit;
+		font: inherit;
+		font-weight: 600;
+		text-decoration: underline 2px var(--knitoutjs-accent);
+		text-underline-offset: 2px;
+		cursor: pointer;
 	}
 
 	/* ── panels, and what lights up ───────────────────────────────────────── */
@@ -408,6 +441,26 @@
 		&[data-glow="linked"]::after {
 			outline-color: color-mix(in oklab, var(--doc) 70%, transparent);
 		}
+
+		/* showing a doc that's open in another pane too */
+		&[data-shared]::before {
+			content: "";
+			position: absolute;
+			inset: 0;
+			z-index: 5;
+			pointer-events: none;
+			box-shadow: inset 0 0 0 2px var(--doc);
+		}
+	}
+
+	/* tinted for a moment when a new build lands in it */
+	& .knitoutjs-flash {
+		position: absolute;
+		inset: 0;
+		z-index: 6;
+		background: var(--doc);
+		opacity: 0;
+		pointer-events: none;
 	}
 
 	& .knitoutjs-slot,
@@ -771,6 +824,48 @@
 			color: var(--knitoutjs-muted);
 			font-size: 11px;
 		}
+
+		&:hover {
+			background: var(--knitoutjs-highlighter);
+			color: var(--knitoutjs-ink);
+		}
+	}
+
+	/* a tab's tool menu: each tool, and a way to open it in a new tab */
+	& .knitoutjs-tool-menu[popover] {
+		width: 200px;
+	}
+
+	& .knitoutjs-tool-option {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+
+		& .knitoutjs-menu-item {
+			flex: 1;
+
+			&::before {
+				content: "";
+				width: 1em;
+			}
+			&[aria-checked="true"]::before {
+				content: "✓";
+			}
+		}
+	}
+
+	& .knitoutjs-open-new {
+		display: grid;
+		flex: none;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		padding: 0;
+		border: none;
+		border-radius: 2px;
+		background: none;
+		color: var(--knitoutjs-muted);
+		cursor: pointer;
 
 		&:hover {
 			background: var(--knitoutjs-highlighter);

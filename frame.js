@@ -1,8 +1,13 @@
-import { createSignal, createMemo, createEffect, onCleanup, For, Show } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup, For, Show } from "solid-js";
 import { createStore, reconcile, produce, unwrap } from "solid-js/store";
 import { render } from "solid-js/web";
 import html from "solid-js/html";
 import { isValidAutomergeUrl } from "@automerge/automerge-repo/slim";
+import {
+  getFallbackTool,
+  getRegistry,
+  getSupportedToolsForType,
+} from "@inkandswitch/patchwork-plugins";
 import {
   TOOLS,
   toolsFor,
@@ -11,6 +16,7 @@ import {
   docText,
   shortUrl,
   newFileDoc,
+  textHash,
 } from "./files.js";
 import {
   findNode,
@@ -27,16 +33,38 @@ import {
   activate,
 } from "./layout.js";
 import defaultSource from "./default-source.js";
+import { builds, setBuild } from "./builds.js";
 
 const STYLESHEET = new URL("./frame.css", import.meta.url).href;
+
+async function loadDatatype(type) {
+  if (!type || type === "file") return undefined;
+  try {
+    return await getRegistry("patchwork:datatype").load(type);
+  } catch {
+    return undefined;
+  }
+}
+
+// "just now", "4 min ago": how long since a .k was built
+function ago(time, now) {
+  const seconds = (now - time) / 1000;
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `on ${new Date(time).toLocaleDateString()}`;
+}
+
 const MIN_CELL = 80;
 const EDGE = 0.22;
 const MAX_EDGE = 64;
 const CODE_EDGE = 28;
 const OUTER_EDGE = 10;
 
-// what can be dragged in: our own tabs, a pane's edit / view buttons (to open
-// that file with that tool somewhere else), and docs from the sidebar
+// what can be dragged in: our own tabs, the tools in a tab's tool menu (to
+// open that file with that tool somewhere else), and docs from the sidebar
 const PANEL_TYPE = "application/x-knitoutjs-panel";
 const TOOL_TYPE = "application/x-knitoutjs-tool";
 // drags that place a pane, rather than bring a doc in
@@ -142,21 +170,34 @@ export default function KnitoutFrameTool(handle, element) {
         source: null,
         editable: false,
         copyOf: null,
+        type: null,
+        builtAt: null,
+        sourceHash: null,
+        textHash: null,
       });
       entry = { info, off: null };
       infos.set(url, entry);
       repo
         .find(url)
-        .then((docHandle) => {
+        .then(async (docHandle) => {
+          // a doc that isn't a file (markdown, say) may only have a title its
+          // datatype can find in it
+          const datatype = await loadDatatype(docHandle.doc()?.["@patchwork"]?.type);
           const update = () => {
             const doc = docHandle.doc();
             setInfo({
-              name: doc?.name || doc?.title || shortUrl(url),
+              name: doc?.name || doc?.title || datatype?.module.getTitle?.(doc) || shortUrl(url),
               extension: fileExtension(doc),
               target: doc?.knitoutTarget ?? null,
               source: doc?.knitoutSource ?? null,
               editable: typeof doc?.content === "string",
               copyOf: doc?.knitoutCopyOf ?? null,
+              type: doc?.["@patchwork"]?.type ?? null,
+              // a .k: when it was built, and from what code
+              builtAt: doc?.knitoutBuiltAt ?? null,
+              sourceHash: doc?.knitoutSourceHash ?? null,
+              // a .js: its code now, to tell the .k it writes is out of date
+              textHash: fileExtension(doc) === "js" ? textHash(docText(doc)) : null,
             });
           };
           update();
@@ -208,6 +249,52 @@ export default function KnitoutFrameTool(handle, element) {
 
   const unhover = () => setHovered(null);
 
+  // a doc open in more than one pane is marked out in each, in its colour
+  const paneCounts = createMemo(() => {
+    const counts = new Map();
+    (function count(node) {
+      if (!node) return;
+      if (node.type === "split") return node.children.forEach(count);
+      for (const url of new Set(node.panels.map((panel) => panel.url))) {
+        counts.set(url, (counts.get(url) ?? 0) + 1);
+      }
+    })(layout.root);
+    return counts;
+  });
+  const inManyPanes = (url) => (paneCounts().get(url) ?? 0) > 1;
+
+  // ── builds: a generated .k says how up to date it is. a "now" that ticks,
+  //    for how long ago it was built
+  const [clock, setClock] = createSignal(Date.now());
+  const ticker = setInterval(() => setClock(Date.now()), 15_000);
+
+  // build a .js into its .k again: by its editor, if it's open in one, so
+  // its build bar shows it too
+  async function rebuild(jsUrl, kUrl) {
+    const builder = builds[jsUrl]?.builder;
+    if (builder) return builder.now();
+    const [{ runInto }, jsHandle, kHandle] = await Promise.all([
+      import("./run.js"),
+      repo.find(jsUrl),
+      repo.find(kUrl),
+    ]);
+    setBuild(jsUrl, { state: "running", line: undefined, message: undefined });
+    const { error } = await runInto(jsHandle, kHandle, repo);
+    setBuild(
+      jsUrl,
+      error
+        ? { state: "error", line: error.line ?? undefined, message: String(error.message ?? error) }
+        : { state: "ok" },
+    );
+  }
+
+  // a build that failed: show the .js, at the line it failed on
+  async function showError(jsUrl, fromPanelId) {
+    await reveal(jsUrl, fromPanelId, "left", "editor");
+    const line = builds[jsUrl]?.line;
+    if (line != null) builds[jsUrl]?.builder?.goToLine(line);
+  }
+
   // ── tools: each panel's tool lives in its own element, which moves with
   //    the panel when the layout changes rather than starting over
 
@@ -250,6 +337,8 @@ export default function KnitoutFrameTool(handle, element) {
   const toolContext = {
     repo,
     open: (url, toolElement, edge) => reveal(url, panelOf(toolElement), edge),
+    openIfClosed: (url, toolElement, edge) =>
+      findPanelShowing(layout.root, url) || reveal(url, panelOf(toolElement), edge),
     editableCopy: (url, toolElement) => editableCopy({ id: panelOf(toolElement), url }),
     get events() {
       return root;
@@ -261,11 +350,13 @@ export default function KnitoutFrameTool(handle, element) {
   const hosts = new Map();
 
   function hostFor(panel) {
-    const { id, url, tool } = panel;
+    const { id, url, tool, patchworkTool } = panel;
     let host = hosts.get(id);
-    if (host && host.url === url && host.tool === tool) return host;
+    if (host && host.url === url && host.tool === tool && host.patchworkTool === patchworkTool) {
+      return host;
+    }
     if (host) destroyHost(id, host);
-    host = { url, tool, el: document.createElement("div"), cleanup: null };
+    host = { url, tool, patchworkTool, el: document.createElement("div"), cleanup: null };
     host.el.className = "knitoutjs-tool";
     hosts.set(id, host);
     mountTool(host);
@@ -279,7 +370,10 @@ export default function KnitoutFrameTool(handle, element) {
         TOOLS[host.tool].load(),
       ]);
       if (host.dead) return;
-      host.cleanup = module.default(docHandle, host.el, toolContext);
+      host.cleanup = module.default(docHandle, host.el, {
+        ...toolContext,
+        toolId: host.patchworkTool,
+      });
     } catch (error) {
       if (host.dead) return;
       host.el.classList.add("knitoutjs-tool-broken");
@@ -377,6 +471,80 @@ export default function KnitoutFrameTool(handle, element) {
     menu.style.top = `${rect.bottom + 4}px`;
     menu.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - 280))}px`;
     menu.showPopover();
+  }
+
+  // ── what a pane's shown with: one of ours, or, for a doc we've no tool
+  //    of our own for, one of the patchwork tools for its datatype (patchwork's
+  //    own pick, unless the pane says which). those arrive as packages load
+
+  const patchworkTools = getRegistry("patchwork:tool");
+  const [patchworkToolsChanged, setPatchworkToolsChanged] = createSignal(0);
+  const offPatchworkTools = patchworkTools.on("changed", () =>
+    setPatchworkToolsChanged((n) => n + 1),
+  );
+
+  // the one patchwork would pick first. not frames (this one included: it's
+  // for knitout projects, but not inside a pane of itself)
+  function patchworkToolsFor(type) {
+    patchworkToolsChanged();
+    if (!type) return [];
+    let first;
+    try {
+      first = getFallbackTool({ "@patchwork": { type } })?.id;
+    } catch {}
+    return getSupportedToolsForType(type)
+      .filter(
+        (tool) =>
+          !tool.unlisted &&
+          !tool.forTitleBar &&
+          !tool.tags?.includes("frame-tool") &&
+          tool.id !== "knitoutjs-panes",
+      )
+      .sort((a, b) => (b.id === first) - (a.id === first) || a.name.localeCompare(b.name));
+  }
+
+  // [{tool, patchworkTool?, name, title}]
+  function toolChoices(url) {
+    const info = docInfo(url);
+    return toolsFor(info.extension)
+      .sort((a, b) => a.position - b.position)
+      .flatMap((tool) => {
+        const theirs = tool.id === "patchwork" ? patchworkToolsFor(info.type) : [];
+        if (!theirs.length) return [{ tool: tool.id, name: tool.name, title: tool.title }];
+        return theirs.map((theirTool) => ({
+          tool: tool.id,
+          patchworkTool: theirTool.id,
+          name: theirTool.name.toLowerCase(),
+          title: `patchwork's ${theirTool.name} tool`,
+        }));
+      });
+  }
+
+  function shownWith(panel) {
+    const choices = toolChoices(panel.url);
+    return (
+      choices.find(
+        (choice) =>
+          choice.tool === panel.tool &&
+          (!panel.patchworkTool || choice.patchworkTool === panel.patchworkTool),
+      ) ?? null
+    );
+  }
+
+  function toolName(panel) {
+    return shownWith(panel)?.name ?? TOOLS[panel.tool]?.name ?? panel.tool;
+  }
+
+  // a tab's tool menu: what it's shown with, and what else it could be
+  let toolMenu;
+  const [toolMenuFor, setToolMenuFor] = createSignal(null);
+
+  function openToolMenu(event, panel, groupId) {
+    setToolMenuFor({ panel, groupId });
+    const rect = event.currentTarget.getBoundingClientRect();
+    toolMenu.style.top = `${rect.bottom + 4}px`;
+    toolMenu.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - 220))}px`;
+    toolMenu.showPopover();
   }
 
   function fromMenu(action) {
@@ -513,9 +681,9 @@ export default function KnitoutFrameTool(handle, element) {
     }
     const tool = dataTransfer.getData(TOOL_TYPE);
     if (tool) {
-      const { url, id } = JSON.parse(tool);
+      const { url, id, patchworkTool } = JSON.parse(tool);
       const at = zone === "code" ? "center" : zone;
-      updateLayout((tree) => openPanels(tree, groupId, at, [newPanel(url, id)]));
+      updateLayout((tree) => openPanels(tree, groupId, at, [newPanel(url, id, patchworkTool)]));
       return;
     }
     const docs = droppedDocs(dataTransfer);
@@ -659,16 +827,7 @@ export default function KnitoutFrameTool(handle, element) {
       }}
       <div class="knitoutjs-body" ref=${(el) => (body = el)}>
         <${For} each=${() => group.panels}>
-          ${(panel) => html`<div
-            class="knitoutjs-panel"
-            hidden=${() => active() !== panel}
-            data-colour=${() => docColour(panel.url)}
-            data-glow=${() => glow(panel.url)}
-            onPointerEnter=${() => setHovered(panel.url)}
-          onPointerLeave=${unhover}
-          >
-            <${Slot} panel=${panel} />
-          </div>`}
+          ${(panel) => html`<${Panel} panel=${panel} active=${() => active() === panel} />`}
         <//>
         <${Show} when=${dragging}>
           <div class="knitoutjs-dropzone">
@@ -685,6 +844,41 @@ export default function KnitoutFrameTool(handle, element) {
         <//>
       </div>
     </section>`;
+  }
+
+  function Panel(props) {
+    const panel = props.panel;
+    const info = docInfo(panel.url);
+    let flash;
+
+    // a new build of the doc it shows (from here or anyone else) tints it for
+    // a moment, so you can see what changed it
+    createEffect(
+      on(
+        () => info.builtAt,
+        (builtAt, before) => {
+          if (before == null || builtAt === before) return;
+          flash?.animate([{ opacity: 0.35 }, { opacity: 0 }], {
+            duration: 700,
+            easing: "ease-out",
+          });
+        },
+        { defer: true },
+      ),
+    );
+
+    return html`<div
+      class="knitoutjs-panel"
+      hidden=${() => !props.active}
+      data-colour=${() => docColour(panel.url)}
+      data-glow=${() => glow(panel.url)}
+      data-shared=${() => (inManyPanes(panel.url) ? "" : undefined)}
+      onPointerEnter=${() => setHovered(panel.url)}
+      onPointerLeave=${unhover}
+    >
+      <${Slot} panel=${panel} />
+      <div class="knitoutjs-flash" ref=${(el) => (flash = el)}></div>
+    </div>`;
   }
 
   function Tab(props) {
@@ -714,6 +908,7 @@ export default function KnitoutFrameTool(handle, element) {
       aria-selected=${() => String(props.active)}
       data-colour=${() => docColour(panel.url)}
       data-glow=${() => glow(panel.url)}
+      data-shared=${() => (inManyPanes(panel.url) ? "" : undefined)}
       title=${() => `${info.name}\ndrag to move it, or onto a pane's edge to split it\ndouble click the name to rename`}
       onClick=${() => updateLayout((tree) => activate(tree, group.id, panel.id))}
       onDragStart=${(event) => {
@@ -721,7 +916,7 @@ export default function KnitoutFrameTool(handle, element) {
         event.dataTransfer.effectAllowed = "move";
       }}
       onPointerEnter=${() => setHovered(panel.url)}
-          onPointerLeave=${unhover}
+      onPointerLeave=${unhover}
     >
       <span class="knitoutjs-swatch"></span>
       ${() =>
@@ -741,7 +936,19 @@ export default function KnitoutFrameTool(handle, element) {
             >
               ${() => info.name}
             </span>`}
-      <span class="knitoutjs-tag">${() => TOOLS[panel.tool]?.name ?? panel.tool}</span>
+      <button
+        class="knitoutjs-tab-tool"
+        aria-haspopup="menu"
+        title="what it's shown with: change it here, or open it with something else in a new tab"
+        onClick=${(event) => {
+          event.stopPropagation();
+          updateLayout((tree) => activate(tree, group.id, panel.id));
+          openToolMenu(event, panel, group.id);
+        }}
+      >
+        ${() => toolName(panel)}
+        <span aria-hidden="true">▾</span>
+      </button>
       <button
         class="knitoutjs-close"
         title="close"
@@ -756,7 +963,7 @@ export default function KnitoutFrameTool(handle, element) {
   }
 
   // the line under the tabs: which doc this is, where it came from, and
-  // which tools can show it
+  // (for a generated .k) how up to date it is
   function Bar(props) {
     const panel = props.panel;
     const info = docInfo(panel.url);
@@ -775,8 +982,9 @@ export default function KnitoutFrameTool(handle, element) {
         title=${() => `${panel.url} (click to copy)`}
         onClick=${copy}
         onPointerEnter=${() => setHovered(panel.url)}
-          onPointerLeave=${unhover}
+        onPointerLeave=${unhover}
       >
+        <span class="knitoutjs-swatch"></span>
         ${() => (copied() ? "copied" : shortUrl(panel.url))}
       </button>
       ${() =>
@@ -809,28 +1017,58 @@ export default function KnitoutFrameTool(handle, element) {
           <span class="knitoutjs-link-name">${() => docInfo(info.source).name}</span>
         </button>`}
       <span class="knitoutjs-spacer"></span>
-      <${Show} when=${() => toolsFor(info.extension).length > 1}>
-        <div class="knitoutjs-switch" role="group">
-          <${For}
-            each=${() =>
-              toolsFor(info.extension).sort((a, b) => a.position - b.position)}
-          >
-            ${(tool) => html`<button
-              title=${`${tool.title}\nclick to switch this pane, or drag it to a tab bar or a pane's edge to open it there too`}
-              draggable="true"
-              aria-pressed=${() => String(panel.tool === tool.id)}
-              onClick=${() => updateLayout((tree) => setTool(tree, panel.id, tool.id))}
-              onDragStart=${(event) => {
-                event.dataTransfer.setData(TOOL_TYPE, JSON.stringify({ url: panel.url, id: tool.id }));
-                event.dataTransfer.effectAllowed = "copy";
-              }}
-            >
-              ${tool.name}
-            </button>`}
-          <//>
-        </div>
-      <//>
+      <${BuildStatus} panel=${panel} />
     </div>`;
+  }
+
+  // a generated .k's line: built just now, out of date, or its .js failed.
+  // only while its .js still writes into it
+  function BuildStatus(props) {
+    const panel = props.panel;
+    const info = docInfo(panel.url);
+    const source = () => (info.source ? docInfo(info.source) : null);
+    const build = () => builds[info.source] ?? {};
+    const outOfDate = () =>
+      !!info.sourceHash && !!source()?.textHash && info.sourceHash !== source().textHash;
+
+    function state() {
+      if (source()?.target !== panel.url) return null;
+      if (build().state === "running") return "running";
+      if (build().state === "error") return "error";
+      // with autobuild on, it's about to build anyway
+      if (outOfDate()) return build().auto && build().builder ? "running" : "stale";
+      return "built";
+    }
+
+    return html`<${Show} when=${state}>
+      <span class="knitoutjs-build-status" data-state=${state}>
+        ${() => {
+          switch (state()) {
+            case "running":
+              return "building…";
+            case "error":
+              return html`<button
+                class="knitoutjs-error-line"
+                title=${() => `${build().message ?? ""}\nshow the .js, at that line`}
+                onClick=${() => showError(info.source, panel.id)}
+              >
+                ${() => (build().line != null ? `⚠ error on line ${build().line}` : "⚠ error")}
+              </button>`;
+            case "stale":
+              return html`out of date —
+                <button
+                  class="knitoutjs-rebuild"
+                  title="build it again from its .js"
+                  onClick=${() => rebuild(info.source, panel.url)}
+                >
+                  rebuild
+                </button>`;
+            default:
+              return () => (info.builtAt ? `generated ${ago(info.builtAt, clock())}` : "generated");
+          }
+        }}
+      </span>
+    <//>`;
   }
 
   function Empty() {
@@ -900,6 +1138,84 @@ export default function KnitoutFrameTool(handle, element) {
     </div>`;
   }
 
+  function ToolMenu() {
+    const tools = () => {
+      const panel = toolMenuFor()?.panel;
+      return panel ? toolChoices(panel.url) : [];
+    };
+    const isChosen = (tool) => {
+      const panel = toolMenuFor()?.panel;
+      const chosen = panel && shownWith(panel);
+      return !!chosen && chosen.tool === tool.tool && chosen.patchworkTool === tool.patchworkTool;
+    };
+
+    function choose(tool) {
+      const { panel } = toolMenuFor();
+      toolMenu.hidePopover();
+      updateLayout((tree) => setTool(tree, panel.id, tool.tool, tool.patchworkTool));
+    }
+
+    function openInNewTab(tool) {
+      const { panel, groupId } = toolMenuFor();
+      toolMenu.hidePopover();
+      updateLayout((tree) =>
+        openPanels(tree, groupId, "center", [newPanel(panel.url, tool.tool, tool.patchworkTool)]),
+      );
+    }
+
+    return html`<div
+      class="knitoutjs-menu knitoutjs-tool-menu"
+      popover="auto"
+      role="menu"
+      ref=${(el) => (toolMenu = el)}
+      onToggle=${(event) => event.newState === "closed" && setToolMenuFor(null)}
+    >
+      <div class="knitoutjs-menu-heading">show with</div>
+      <${For} each=${tools}>
+        ${(tool) => html`<div class="knitoutjs-tool-option">
+          <button
+            class="knitoutjs-menu-item"
+            role="menuitemradio"
+            aria-checked=${() => String(isChosen(tool))}
+            title=${`${tool.title}\nclick to show it with this here, or drag it to a tab bar or a pane's edge to open it there too`}
+            draggable="true"
+            onClick=${() => choose(tool)}
+            onDragStart=${(event) => {
+              event.dataTransfer.setData(
+                TOOL_TYPE,
+                JSON.stringify({
+                  url: toolMenuFor().panel.url,
+                  id: tool.tool,
+                  patchworkTool: tool.patchworkTool,
+                }),
+              );
+              event.dataTransfer.effectAllowed = "copy";
+            }}
+          >
+            ${tool.name}
+          </button>
+          <button
+            class="knitoutjs-open-new"
+            title=${`open it with ${tool.name} in a new tab`}
+            aria-label=${`open it with ${tool.name} in a new tab`}
+            onClick=${() => openInNewTab(tool)}
+          >
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path
+                d="M9 2.5h4.5V7M13.5 2.5 7 9M11.5 9.5v3.5a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5h3.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>`}
+      <//>
+    </div>`;
+  }
+
   const dispose = render(
     () =>
       html`<link rel="stylesheet" href=${STYLESHEET} />
@@ -930,6 +1246,7 @@ export default function KnitoutFrameTool(handle, element) {
             <div class="knitoutjs-outer-hint" data-zone=${outerZone}></div>
           <//>
           <${Menu} />
+          <${ToolMenu} />
         </div>`,
     element,
   );
@@ -940,6 +1257,8 @@ export default function KnitoutFrameTool(handle, element) {
     document.removeEventListener("dragend", stopDragging);
     document.removeEventListener("drop", stopDragging);
     clearTimeout(noticeTimer);
+    clearInterval(ticker);
+    offPatchworkTools();
     for (const [id, host] of hosts) destroyHost(id, host);
     for (const { off } of infos.values()) off?.();
     dispose();

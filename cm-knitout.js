@@ -1,5 +1,5 @@
 import {StateEffect, StateField} from "@codemirror/state"
-import {EditorView, Decoration, ViewPlugin} from "@codemirror/view"
+import {EditorView, Decoration, ViewPlugin, WidgetType} from "@codemirror/view"
 
 const setHoverLine = StateEffect.define()
 
@@ -32,8 +32,25 @@ const hoverLineField = StateField.define({
 	provide: field => EditorView.decorations.from(field),
 })
 
-// the line a run failed on, until the code changes
+// the line a build failed on, until the code changes: tinted, with what
+// went wrong written at its end
 const setErrorLine = StateEffect.define()
+
+class ErrorMessage extends WidgetType {
+	constructor(message) {
+		super()
+		this.message = message
+	}
+	eq(other) {
+		return other.message === this.message
+	}
+	toDOM() {
+		const span = document.createElement("span")
+		span.className = "cm-knitout-error-message"
+		span.textContent = `⚠ ${this.message}`
+		return span
+	}
+}
 
 const errorLineField = StateField.define({
 	create() {
@@ -53,6 +70,10 @@ const errorLineField = StateField.define({
 						class: "cm-knitout-error-line",
 						attributes: {title: effect.value.message},
 					}).range(line.from),
+					Decoration.widget({
+						widget: new ErrorMessage(effect.value.message),
+						side: 1,
+					}).range(line.to),
 				])
 			}
 		}
@@ -81,6 +102,11 @@ const knitoutTheme = EditorView.baseTheme({
 		backgroundColor:
 			"color-mix(in oklab, var(--studio-danger, #d33a4c) 14%, transparent)",
 		boxShadow: "inset 3px 0 0 var(--studio-danger, #d33a4c)",
+	},
+	".cm-knitout-error-message": {
+		marginLeft: "2ch",
+		color: "var(--studio-danger, #d33a4c)",
+		fontStyle: "italic",
 	},
 	".cm-knitout-hover-line": {
 		backgroundColor: "rgba(255, 220, 0, 0.25)",

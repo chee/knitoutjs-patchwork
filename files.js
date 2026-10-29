@@ -9,6 +9,16 @@ export function docText(doc) {
   return String(content);
 }
 
+// a short fingerprint of some text (fnv-1a): a .k keeps one of the code it
+// was built from, so anyone can see when that code has changed since
+export function textHash(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 // "js", "k", or whatever else the file says it is
 export function fileExtension(doc) {
   if (doc?.extension) return doc.extension.replace(/^\./, "").toLowerCase();
@@ -21,16 +31,16 @@ export function fileExtension(doc) {
 export const TOOLS = {
   visualizer: {
     id: "visualizer",
-    name: "view",
+    name: "visualiser",
     title: "draw the stitches this .k makes",
-    // where it sits in a pane's edit | view switch
+    // where it sits in a tab's tool menu
     position: 2,
     extensions: ["k"],
     load: () => import("./visualizer.js"),
   },
   editor: {
     id: "editor",
-    name: "edit",
+    name: "text",
     title: "see the file's text (and change it, if it isn't generated)",
     position: 1,
     extensions: ["js", "k"],

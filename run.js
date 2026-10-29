@@ -1,6 +1,6 @@
 import { ImmutableString } from "@automerge/automerge";
 import { parser } from "./vendor/lezer-javascript.js";
-import { docText } from "./files.js";
+import { docText, textHash } from "./files.js";
 
 // patterns run in a worker (run-worker.js), so the page never waits on them.
 // every loop gets a turn counter, so a loop that never ends stops with the
@@ -156,16 +156,21 @@ export function compile(code, { repo, signal } = {}) {
 }
 
 // run the .js handle's code and write the knitout into the .k handle,
-// remembering on each side who it's linked to. the knitout goes in as an
-// ImmutableString: writing a big one as editable text is slow, and a
-// generated .k isn't for typing into (make an editable copy for that)
+// remembering on each side who it's linked to, and on the .k when it was
+// built and from what code (so it can tell when it's out of date). the
+// knitout goes in as an ImmutableString: writing a big one as editable text
+// is slow, and a generated .k isn't for typing into (make an editable copy
+// for that)
 export async function runInto(jsHandle, kHandle, repo, { signal } = {}) {
-  const result = await compile(docText(jsHandle.doc()), { repo, signal });
-  // a run that failed leaves the .k as it was
+  const code = docText(jsHandle.doc());
+  const result = await compile(code, { repo, signal });
+  // a build that failed leaves the .k as it was
   if (result.error) return result;
   kHandle.change((doc) => {
     doc.content = new ImmutableString(result.knitout);
     doc.knitoutSource = jsHandle.url;
+    doc.knitoutSourceHash = textHash(code);
+    doc.knitoutBuiltAt = Date.now();
   });
   if (jsHandle.doc()?.knitoutTarget !== kHandle.url) {
     jsHandle.change((doc) => {

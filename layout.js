@@ -12,8 +12,10 @@ export function newId() {
   return crypto.randomUUID().slice(0, 8);
 }
 
-export function newPanel(url, tool) {
-  return { id: newId(), url, tool };
+// `patchworkTool`: which of patchwork's tools a "patchwork" panel uses (when
+// it isn't the one patchwork would pick)
+export function newPanel(url, tool, patchworkTool) {
+  return patchworkTool ? { id: newId(), url, tool, patchworkTool } : { id: newId(), url, tool };
 }
 
 export function newGroup(panels) {
@@ -186,9 +188,13 @@ export function movePanel(root, panelId, groupId, zone) {
   return openPanels(root, groupId, zone, [panel]);
 }
 
-export function setTool(root, panelId, tool) {
+export function setTool(root, panelId, tool, patchworkTool) {
   const found = findPanel(root, panelId);
-  if (found) found.group.panels[found.index].tool = tool;
+  if (!found) return root;
+  const panel = found.group.panels[found.index];
+  panel.tool = tool;
+  if (patchworkTool) panel.patchworkTool = patchworkTool;
+  else delete panel.patchworkTool;
   return root;
 }
 
