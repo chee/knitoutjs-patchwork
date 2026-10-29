@@ -19,6 +19,17 @@ export function textHash(text) {
   return (hash >>> 0).toString(36);
 }
 
+// a module worker, from a script that may be on another origin (the site
+// loading these panes from where they're hosted). a worker can't be started
+// from another origin's script, but a blob of this origin's can import it
+// (with cors)
+export function moduleWorker(url) {
+  if (new URL(url).origin === location.origin) return new Worker(url, { type: "module" });
+  const source = `import ${JSON.stringify(String(url))};`;
+  const blob = new Blob([source], { type: "text/javascript" });
+  return new Worker(URL.createObjectURL(blob), { type: "module" });
+}
+
 // "js", "k", or whatever else the file says it is
 export function fileExtension(doc) {
   if (doc?.extension) return doc.extension.replace(/^\./, "").toLowerCase();

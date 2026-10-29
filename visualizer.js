@@ -1,5 +1,5 @@
 import {convertKnitout} from "./vendor/knitout-to-kcode.js"
-import {docText} from "./files.js"
+import {docText, moduleWorker} from "./files.js"
 import {parseSource, highlighter} from "./stitch-source.js"
 
 const STYLESHEET = new URL("./visualizer.css", import.meta.url).href
@@ -80,7 +80,7 @@ function sizeOf(canvas) {
 // canvas's own events go there to be handled; hover and double click come back
 function workerRenderer(canvas, {onHover, onGoto, onFail}) {
 	const offscreen = canvas.transferControlToOffscreen()
-	const worker = new Worker(WORKER_URL, {type: "module"})
+	const worker = moduleWorker(WORKER_URL)
 	const parsing = new Map()
 	let parses = 0
 	let ready = false

@@ -1055,14 +1055,17 @@ export default function KnitoutFrameTool(handle, element) {
                 ${() => (build().line != null ? `⚠ error on line ${build().line}` : "⚠ error")}
               </button>`;
             case "stale":
-              return html`out of date —
-                <button
+              // an array: html`` drops text before an element at the top
+              return [
+                "out of date —",
+                html`<button
                   class="knitoutjs-rebuild"
                   title="build it again from its .js"
                   onClick=${() => rebuild(info.source, panel.url)}
                 >
                   rebuild
-                </button>`;
+                </button>`,
+              ];
             default:
               return () => (info.builtAt ? `generated ${ago(info.builtAt, clock())}` : "generated");
           }

@@ -1,6 +1,6 @@
 import { ImmutableString } from "@automerge/automerge";
 import { parser } from "./vendor/lezer-javascript.js";
-import { docText, textHash } from "./files.js";
+import { docText, moduleWorker, textHash } from "./files.js";
 
 // patterns run in a worker (run-worker.js), so the page never waits on them.
 // every loop gets a turn counter, so a loop that never ends stops with the
@@ -106,7 +106,7 @@ export function compile(code, { repo, signal } = {}) {
   }
 
   return new Promise((resolve) => {
-    const worker = new Worker(WORKER_URL, { type: "module" });
+    const worker = moduleWorker(WORKER_URL);
     let timer;
 
     function finish(knitout, error) {
