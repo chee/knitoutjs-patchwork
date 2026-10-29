@@ -18,19 +18,19 @@ k.in(main_carrier);
 for (let r = 0; r < rows; ++r) {
 	//even numbered rows knit left to right
 	if (r%2 == 0) {
-			for (let n = max_needle; n >= min_needle; --n){
+			for (let n = min_needle; n <= max_needle; ++n){
 
 				// knit a stitch on the front bed
-				k.knit("-", "f" + n, main_carrier);
+				k.knit("+", "f" + n, main_carrier);
 		}
 	}
 
 	//odd numbered rows knit right to left
 	else {
-			for (let n = min_needle; n <= max_needle; ++n){
+			for (let n = max_needle; n >= min_needle; --n){
 
 				// knit a stitch on the front bed
-				k.knit("+", "f" + n, main_carrier);
+				k.knit("-", "f" + n, main_carrier);
 		}
 	}
 }
