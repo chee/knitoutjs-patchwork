@@ -288,6 +288,29 @@ export default function KnitoutFrameTool(handle, element) {
     );
   }
 
+  // how a generated .k is doing: built, building, out of date, or its .js
+  // failed. null once its .js writes somewhere else
+  function buildState(kUrl) {
+    const info = docInfo(kUrl);
+    const source = info.source ? docInfo(info.source) : null;
+    if (source?.target !== kUrl) return null;
+    const build = builds[info.source] ?? {};
+    if (build.state === "running") return "running";
+    if (build.state === "error") return "error";
+    const outOfDate = !!info.sourceHash && !!source.textHash && info.sourceHash !== source.textHash;
+    // with autobuild on, it's about to build anyway
+    if (outOfDate) return build.auto && build.builder ? "running" : "stale";
+    return "built";
+  }
+
+  // a generated .k that isn't keeping up with its .js: it failed, or it's out
+  // of date, or it's building again after failing
+  function stuck(kUrl) {
+    const state = buildState(kUrl);
+    if (state === "error" || state === "stale") return true;
+    return state === "running" && !!builds[docInfo(kUrl).source]?.failed;
+  }
+
   // a build that failed: show the .js, at the line it failed on
   async function showError(jsUrl, fromPanelId) {
     await reveal(jsUrl, fromPanelId, "left", "editor");
@@ -873,6 +896,7 @@ export default function KnitoutFrameTool(handle, element) {
       data-colour=${() => docColour(panel.url)}
       data-glow=${() => glow(panel.url)}
       data-shared=${() => (inManyPanes(panel.url) ? "" : undefined)}
+      data-stuck=${() => (stuck(panel.url) ? "" : undefined)}
       onPointerEnter=${() => setHovered(panel.url)}
       onPointerLeave=${unhover}
     >
@@ -1021,23 +1045,17 @@ export default function KnitoutFrameTool(handle, element) {
     </div>`;
   }
 
-  // a generated .k's line: built just now, out of date, or its .js failed.
-  // only while its .js still writes into it
+  // a generated .k's line: built just now, out of date, or its .js failed,
+  // only while its .js still writes into it. a .js's says when it failed
   function BuildStatus(props) {
     const panel = props.panel;
     const info = docInfo(panel.url);
-    const source = () => (info.source ? docInfo(info.source) : null);
-    const build = () => builds[info.source] ?? {};
-    const outOfDate = () =>
-      !!info.sourceHash && !!source()?.textHash && info.sourceHash !== source().textHash;
+    const jsUrl = () => info.source ?? panel.url;
+    const build = () => builds[jsUrl()] ?? {};
 
     function state() {
-      if (source()?.target !== panel.url) return null;
-      if (build().state === "running") return "running";
-      if (build().state === "error") return "error";
-      // with autobuild on, it's about to build anyway
-      if (outOfDate()) return build().auto && build().builder ? "running" : "stale";
-      return "built";
+      if (!info.source) return build().state === "error" ? "error" : null;
+      return buildState(panel.url);
     }
 
     return html`<${Show} when=${state}>
@@ -1049,8 +1067,8 @@ export default function KnitoutFrameTool(handle, element) {
             case "error":
               return html`<button
                 class="knitoutjs-error-line"
-                title=${() => `${build().message ?? ""}\nshow the .js, at that line`}
-                onClick=${() => showError(info.source, panel.id)}
+                title=${() => `${build().message ?? ""}\n${info.source ? "show the .js, at that line" : "go to that line"}`}
+                onClick=${() => showError(jsUrl(), panel.id)}
               >
                 ${() => (build().line != null ? `⚠ error on line ${build().line}` : "⚠ error")}
               </button>`;

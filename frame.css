@@ -442,14 +442,23 @@
 			outline-color: color-mix(in oklab, var(--doc) 70%, transparent);
 		}
 
-		/* showing a doc that's open in another pane too */
-		&[data-shared]::before {
+		&[data-shared]::before,
+		&[data-stuck]::before {
 			content: "";
 			position: absolute;
 			inset: 0;
 			z-index: 5;
 			pointer-events: none;
+		}
+
+		/* showing a doc that's open in another pane too */
+		&[data-shared]::before {
 			box-shadow: inset 0 0 0 2px var(--doc);
+		}
+
+		/* a .k that isn't keeping up with its .js: it failed, or it's out of date */
+		&[data-stuck]::before {
+			background: color-mix(in oklab, var(--knitoutjs-danger) 16%, transparent);
 		}
 	}
 
