@@ -129,6 +129,10 @@ export default function KnitoutFrameTool(handle, element) {
   let root;
   let menu;
 
+  // a stylesheet added by script doesn't hold up painting, so stay hidden
+  // until it's in, or you see the whole frame unstyled first
+  const [styled, setStyled] = createSignal(false);
+
   // ── what's in the project doc ──────────────────────────────────────────
 
   const [layout, setLayout] = createStore({ root: null });
@@ -1239,7 +1243,12 @@ export default function KnitoutFrameTool(handle, element) {
 
   const dispose = render(
     () =>
-      html`<link rel="stylesheet" href=${STYLESHEET} />
+      html`<link
+          rel="stylesheet"
+          href=${STYLESHEET}
+          onLoad=${() => setStyled(true)}
+          onError=${() => setStyled(true)}
+        />
         <div
           class="knitoutjs-editor-tool knitoutjs-frame"
           ref=${(el) => {
@@ -1247,6 +1256,7 @@ export default function KnitoutFrameTool(handle, element) {
             listenForDrops(el);
           }}
           data-resizing=${resizing}
+          style=${() => (styled() ? {} : { visibility: "hidden" })}
         >
           <svg class="knitoutjs-defs" aria-hidden="true">
             <filter id="knitoutjs-rough-1">

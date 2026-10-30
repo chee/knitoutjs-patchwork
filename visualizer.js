@@ -174,13 +174,19 @@ async function pageRenderer(canvas, {onHover, onGoto}) {
 export default function KnitoutVisualizerTool(handle, element, context = {}) {
 	const events = context.events ?? element
 
+	// a stylesheet added by script doesn't hold up painting, so stay hidden
+	// until it's in, or you see the canvas and buttons unstyled first
+	const root = document.createElement("div")
+	root.className = "knitoutjs-editor-tool knitout-visualizer"
+	root.style.visibility = "hidden"
+	const reveal = () => root.style.removeProperty("visibility")
+
 	const link = document.createElement("link")
 	link.rel = "stylesheet"
 	link.href = STYLESHEET
+	link.addEventListener("load", reveal)
+	link.addEventListener("error", reveal)
 	element.appendChild(link)
-
-	const root = document.createElement("div")
-	root.className = "knitoutjs-editor-tool knitout-visualizer"
 	element.appendChild(root)
 
 	// watch the canvas, not root: root can already fill the pane before the
