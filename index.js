@@ -37,8 +37,8 @@ export const KnitoutJSDatatype = {
 export const plugins = [
   {
     type: "patchwork:datatype",
-    id: "knitoutjs-panes",
-    name: "KnitoutJS Editor",
+    id: "prototype-knitoutjs-panes",
+    name: "Prototype KnitoutJS Editor",
     icon: "Shirt",
     async load() {
       return KnitoutJSDatatype;
@@ -46,10 +46,10 @@ export const plugins = [
   },
   {
     type: "patchwork:tool",
-    id: "knitoutjs-panes",
-    name: "Knitout JS Editor",
+    id: "prototype-knitoutjs-panes",
+    name: "Prototype Knitout JS Editor",
     icon: "Shirt",
-    supportedDatatypes: ["knitoutjs-panes"],
+    supportedDatatypes: ["prototype-knitoutjs-panes"],
     async load() {
       const { default: KnitoutFrameTool } = await import("./frame.js");
       return KnitoutFrameTool;
@@ -57,8 +57,8 @@ export const plugins = [
   },
   {
     type: "patchwork:tool",
-    id: "knitoutjs-panes-visualizer",
-    name: "Knitout Visualizer",
+    id: "prototype-knitoutjs-panes-visualizer",
+    name: "Prototype Knitout Visualizer",
     icon: "Grid3x3",
     supportedDatatypes: ["file"],
     async load() {
