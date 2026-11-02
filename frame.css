@@ -166,7 +166,7 @@
 	& .knitoutjs-tabs {
 		display: flex;
 		flex: none;
-		height: 26px;
+		height: 34px;
 		overflow-x: auto;
 		scrollbar-width: none;
 		background: var(--knitoutjs-chrome);
@@ -177,10 +177,12 @@
 	& .knitoutjs-tab {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		max-width: 240px;
-		padding: 0 4px 0 8px;
-		border-right: 1px solid var(--knitoutjs-line-soft);
+		gap: 4px;
+		max-width: 300px;
+		padding: 0 4px 0 6px;
+		border-right: 2px solid var(--knitoutjs-line-soft);
+		/* the name and its tool share this, so they shrink together */
+		font-size: 11px;
 		white-space: nowrap;
 		cursor: default;
 		user-select: none;
@@ -207,10 +209,30 @@
 			outline-offset: -3px;
 		}
 
-		&:hover .knitoutjs-close,
-		&[aria-selected="true"] .knitoutjs-close {
-			opacity: 0.6;
-		}
+	}
+
+	/* the tab's one control: the name on the left, what it's shown with on the
+	   right, in a single outlined pill */
+	& .knitoutjs-tab-pill {
+		display: inline-flex;
+		align-items: stretch;
+		align-self: center;
+		min-width: 0;
+		height: 22px;
+		/* clear of the bar's bottom rule and the selected tab's underline */
+		margin-bottom: 1px;
+		border: 1px solid var(--knitoutjs-line);
+		border-radius: 4px;
+		background: var(--knitoutjs-sheet);
+		overflow: hidden;
+	}
+
+	& .knitoutjs-tab-title {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		padding: 0 8px;
 	}
 
 	& .knitoutjs-tab-name {
@@ -228,56 +250,88 @@
 		font: inherit;
 	}
 
-	/* what the tab's shown with: opens its tool menu */
+	/* what the tab's shown with: opens its tool menu. the pill's right-hand
+	   segment, a shade darker than the name */
 	& .knitoutjs-tab-tool {
 		display: inline-flex;
 		flex: none;
 		align-items: center;
-		gap: 2px;
-		padding: 0 3px;
+		gap: 6px;
+		margin: 0;
+		padding: 0 7px;
 		border: none;
-		border-radius: 2px;
-		background: none;
-		color: var(--knitoutjs-muted);
-		font: 10.5px/16px var(--knitoutjs-sans);
+		border-left: 1px solid var(--knitoutjs-line);
+		border-radius: 0;
+		background: var(--knitoutjs-chrome);
+		color: var(--knitoutjs-ink);
+		/* the tab name's own type and line box, just boxed, so the two sit on
+		   one line */
+		font: inherit;
+		line-height: inherit;
+		appearance: none;
 		cursor: pointer;
 
-		& span {
-			font-size: 8px;
+		/* drawn, not a glyph, so it sits where the text does whatever the font */
+		& .knitoutjs-tab-tool-arrow {
+			display: block;
+			flex: none;
+			width: 9px;
+			height: 5.5px;
 		}
 
 		&:hover {
-			background: var(--knitoutjs-line-soft);
-			color: var(--knitoutjs-ink);
+			background: var(--knitoutjs-chrome-hover);
 		}
 	}
 
+	/* a drawn cross, the pill's height, so it sits on the pill's centre line */
 	& .knitoutjs-close {
-		width: 16px;
-		height: 16px;
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		align-self: center;
+		justify-content: center;
+		width: 20px;
+		height: 22px;
+		margin-bottom: 1px;
 		padding: 0;
 		border: none;
-		border-radius: 2px;
+		border-radius: 3px;
 		background: none;
 		color: inherit;
-		font: 14px/1 var(--knitoutjs-sans);
-		opacity: 0;
+		opacity: 0.7;
 		cursor: pointer;
 
+		& svg {
+			display: block;
+		}
+
 		&:hover {
-			opacity: 1 !important;
+			opacity: 1;
 			background: var(--knitoutjs-line-soft);
 		}
 	}
 
+	/* a drawn plus, on the pills' centre line like the cross */
 	& .knitoutjs-add {
+		display: inline-flex;
 		flex: none;
-		width: 26px;
+		align-items: center;
+		align-self: center;
+		justify-content: center;
+		width: 24px;
+		height: 22px;
+		margin: 0 0 1px 2px;
+		padding: 0;
 		border: none;
+		border-radius: 3px;
 		background: none;
 		color: inherit;
-		font: 16px/1 var(--knitoutjs-sans);
 		cursor: pointer;
+
+		& svg {
+			display: block;
+		}
 
 		&:hover {
 			background: var(--knitoutjs-highlighter);
