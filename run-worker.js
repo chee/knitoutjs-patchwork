@@ -21,6 +21,10 @@ const repo = {
   },
 };
 
+// and on the worker's global too, for modules the pattern imports: they're
+// written for a page with a repo on it, and look for it there
+self.repo = repo;
+
 function loopCounter(loopBudget, timeBudget) {
   const start = performance.now();
   let turns = 0;
