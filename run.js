@@ -32,6 +32,9 @@ function callTarget(call) {
 // - every call notes its line, `k.knit(…)` → `__at(line, k).knit(…)`, so a
 //   stitch knows where it came from even where stack traces don't say
 //   (safari). `__at` hands back what it's given, so `this` is unchanged
+// - every `import(x)` becomes `__import(line, x)`. left alone, `/automerge:…`
+//   would be found next to evalJS.js (wherever these panes are hosted), not
+//   on the page's own site, where the service worker hands out docs
 export function instrument(code) {
   const tree = parser.parse(code);
   const lineAt = (pos) => code.slice(0, pos).split("\n").length;
@@ -50,6 +53,13 @@ export function instrument(code) {
         const line = lineAt(node.from);
         inserts.push({ at: body.from, text: `{__loop(${line});`, depth, open: true });
         inserts.push({ at: body.to, text: "}", depth, open: false });
+      } else if (node.name === "DynamicImport") {
+        const keyword = node.node.firstChild;
+        const paren = keyword?.nextSibling;
+        if (keyword?.name !== "import" || paren?.name !== "(") return;
+        const line = lineAt(node.from);
+        inserts.push({ at: keyword.from, text: "__", depth, open: true });
+        inserts.push({ at: paren.to, text: `${line}, `, depth, open: true });
       } else if (node.name === "CallExpression") {
         const target = callTarget(node.node);
         const text = target && code.slice(target.from, target.to);
@@ -149,6 +159,8 @@ export function compile(code, { repo, signal } = {}) {
     worker.postMessage({
       type: "run",
       code: budgeted,
+      // where the pattern's imports are found from: the page, not this file
+      base: location.href,
       loopBudget: LOOP_BUDGET,
       timeBudget: TIME_BUDGET,
     });
