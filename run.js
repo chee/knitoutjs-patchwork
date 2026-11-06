@@ -1,4 +1,5 @@
 import { ImmutableString } from "@automerge/automerge";
+import { MessagePortTransport } from "@automerge/automerge-subduction/slim";
 import { parser } from "./vendor/lezer-javascript.js";
 import { docText, moduleWorker, textHash } from "./files.js";
 
@@ -8,6 +9,9 @@ import { docText, moduleWorker, textHash } from "./files.js";
 export const LOOP_BUDGET = 10_000_000;
 export const TIME_BUDGET = 5_000;
 const HARD_STOP = TIME_BUDGET + 1_500;
+// how long the worker gets to load automerge and start its Repo, before the
+// pattern's own time starts
+const SETUP_BUDGET = 10_000;
 
 const WORKER_URL = new URL("./run-worker.js", import.meta.url);
 
@@ -171,13 +175,36 @@ function firstBrokenLine(code) {
   return at === null ? null : code.slice(0, at).split("\n").length;
 }
 
-// a plain copy of a doc, to hand to the worker
-function snapshot(doc) {
-  return JSON.parse(JSON.stringify(doc ?? null));
+// what the worker and the window call the subduction link between them
+const SERVICE = "knitout-run";
+
+// the wasm this page already loaded (its name is hashed in a build), or the
+// path that redirects to the current one
+function wasmUrl(name) {
+  const file = new RegExp(`/${name}(-[\\w-]+)?\\.wasm$`);
+  const loaded = performance
+    .getEntriesByType("resource")
+    .find((entry) => file.test(new URL(entry.name).pathname));
+  return loaded?.name ?? new URL(`/${name}.wasm`, location.href).href;
 }
 
-// run a knitout.js pattern: {knitout, error, ms}. the pattern can use
-// `repo.find(url)` to read other docs. aborting `signal` stops it
+// where the worker loads automerge from: the same files as the page, found
+// through the page's import map (a worker doesn't have one)
+function automergeForWorker() {
+  return {
+    service: SERVICE,
+    modules: {
+      automerge: import.meta.resolve("@automerge/automerge/slim"),
+      subduction: import.meta.resolve("@automerge/automerge-subduction/slim"),
+      repo: import.meta.resolve("@automerge/automerge-repo/slim"),
+    },
+    wasm: { automerge: wasmUrl("automerge"), subduction: wasmUrl("subduction") },
+  };
+}
+
+// run a knitout.js pattern: {knitout, error, ms}. the pattern has a Repo of
+// its own, synced with `repo` over subduction, so `repo.find(url)` there finds
+// what this window has. aborting `signal` stops it
 export function compile(code, { repo, signal, name } = {}) {
   const start = performance.now();
   let budgeted;
@@ -200,30 +227,52 @@ export function compile(code, { repo, signal, name } = {}) {
   return new Promise((resolve) => {
     const worker = moduleWorker(WORKER_URL);
     let timer;
+    // the worker's Repo, connected to this window's: hung up when it's done
+    const links = [];
 
     function finish(knitout, error) {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
       worker.terminate();
+      for (const hangUp of links) hangUp();
       resolve({ knitout, error, ms: performance.now() - start });
+    }
+
+    function hardStop() {
+      finish("", { message: `stopped after ${HARD_STOP / 1000}s. is something looping forever?` });
+    }
+
+    // the worker's Repo asking to connect: this window's Repo is its peer
+    // until the run's over
+    async function accept(port) {
+      const transport = new MessagePortTransport(port);
+      const linked = (async () => {
+        const subduction = await repo.subduction;
+        const peer = await subduction.acceptTransport(transport, SERVICE);
+        return () => subduction.disconnectFromPeer(peer);
+      })();
+      links.push(() => {
+        transport.disconnect().catch(() => {});
+        // the handshake may finish after the run has
+        linked.then((hangUp) => hangUp()).catch(() => {});
+      });
+      linked.catch((error) => console.warn("couldn't connect the pattern's repo to this window's", error));
     }
 
     function onAbort() {
       finish("", { message: "stopped", stopped: true });
     }
 
-    worker.onmessage = async ({ data }) => {
+    worker.onmessage = ({ data }) => {
       if (data.type === "done") {
         const error = data.error;
         if (error?.syntax && error.line == null) error.line = firstBrokenLine(code);
         finish(data.knitout, error);
-      } else if (data.type === "find") {
-        try {
-          const doc = (await repo.find(data.url)).doc();
-          worker.postMessage({ type: "doc", id: data.id, doc: snapshot(doc) });
-        } catch (error) {
-          worker.postMessage({ type: "missing", id: data.id, message: String(error?.message ?? error) });
-        }
+      } else if (data.type === "connect") {
+        accept(data.port);
+      } else if (data.type === "started") {
+        clearTimeout(timer);
+        timer = setTimeout(hardStop, HARD_STOP);
       }
     };
     worker.onerror = (event) => {
@@ -231,10 +280,7 @@ export function compile(code, { repo, signal, name } = {}) {
       finish("", { message: event.message || "the pattern's worker didn't start" });
     };
 
-    timer = setTimeout(
-      () => finish("", { message: `stopped after ${HARD_STOP / 1000}s. is something looping forever?` }),
-      HARD_STOP,
-    );
+    timer = setTimeout(hardStop, SETUP_BUDGET + HARD_STOP);
     if (signal?.aborted) return onAbort();
     signal?.addEventListener("abort", onAbort);
 
@@ -246,6 +292,7 @@ export function compile(code, { repo, signal, name } = {}) {
       base: location.href,
       loopBudget: LOOP_BUDGET,
       timeBudget: TIME_BUDGET,
+      automerge: automergeForWorker(),
     });
   });
 }

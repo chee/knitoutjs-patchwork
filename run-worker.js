@@ -3,27 +3,63 @@ import { evalJS } from "./vendor/evalJS.js";
 // runs one knitout.js pattern off the page's thread, so a pattern that never
 // ends can't freeze anything: the page just stops this worker.
 //
-// in:  {type: "run", code, sourceMap, base, loopBudget, timeBudget}
-//      (loops already counted; sourceMap leads back to the code as written)
-//      {type: "doc", id, doc} | {type: "missing", id, message}
-// out: {type: "done", knitout, error: {message, line} | null}
-//      {type: "find", id, url}
+// in:  {type: "run", code, sourceMap, base, loopBudget, timeBudget, automerge}
+//      (loops already counted; sourceMap leads back to the code as written;
+//      automerge says where to load the Repo from, see compile in run.js)
+// out: {type: "connect", port}   a port for the window's Repo to sync over
+//      {type: "started"}         the Repo is up, the pattern is running
+//      {type: "done", knitout, error: {message, line} | null}
 
-let asked = 0;
-const waiting = new Map();
+// a Repo of our own, with the window's Repo as its only peer: subduction over
+// a MessageChannel. nothing stored here; everything comes from the window,
+// which has the sync server. a worker has no import map, so the page says
+// where the modules and wasm are
+let started;
+function startRepo({ modules, wasm, service }) {
+  started ??= (async () => {
+    const [{ initializeWasm }, subduction, { Repo }] = await Promise.all([
+      import(modules.automerge),
+      import(modules.subduction),
+      import(modules.repo),
+    ]);
+    await Promise.all([
+      initializeWasm(new Request(wasm.automerge)),
+      subduction.default(new Request(wasm.subduction)),
+    ]);
+    return new Repo({
+      subductionWebsocketEndpoints: [windowEndpoint(service, subduction.MessagePortTransport)],
+    });
+  })();
+  return started;
+}
 
-// enough of a repo for `await repo.find(url)`: a snapshot of the doc, read only
-const repo = {
-  find(url) {
-    const id = ++asked;
-    postMessage({ type: "find", id, url });
-    return new Promise((resolve, reject) => waiting.set(id, { url, resolve, reject }));
-  },
-};
-
-// and on the worker's global too, for modules the pattern imports: they're
-// written for a page with a repo on it, and look for it there
-self.repo = repo;
+// what the Repo's reconnect loop connects to: each time, a fresh channel, one
+// end to the page (which accepts on it) and one end here
+function windowEndpoint(service, MessagePortTransport) {
+  return {
+    // the reconnect loop takes this url's host as the service name
+    url: `knitout://${service}`,
+    async connect() {
+      const { port1, port2 } = new MessageChannel();
+      postMessage({ type: "connect", port: port2 }, [port2]);
+      const transport = new MessagePortTransport(port1);
+      let hungUp;
+      const closed = new Promise((resolve) => (hungUp = resolve));
+      let then = () => {};
+      transport.onDisconnect(() => {
+        hungUp();
+        then();
+      });
+      return {
+        sendBytes: (bytes) => transport.sendBytes(bytes),
+        recvBytes: () => transport.recvBytes(),
+        disconnect: () => transport.disconnect(),
+        onDisconnect: (callback) => (then = callback),
+        closed: () => closed,
+      };
+    },
+  };
+}
 
 function loopCounter(loopBudget, timeBudget) {
   const start = performance.now();
@@ -46,17 +82,23 @@ function loopCounter(loopBudget, timeBudget) {
 }
 
 onmessage = async ({ data }) => {
-  if (data.type === "doc" || data.type === "missing") {
-    const asking = waiting.get(data.id);
-    waiting.delete(data.id);
-    if (data.type === "doc") {
-      asking?.resolve({ url: asking.url, isReady: () => true, doc: () => data.doc });
-    } else {
-      asking?.reject(new Error(data.message));
-    }
+  if (data.type !== "run") return;
+  let repo;
+  try {
+    repo = await startRepo(data.automerge);
+  } catch (e) {
+    postMessage({
+      type: "done",
+      knitout: "",
+      error: { message: `the pattern's repo didn't start: ${e?.message ?? e}`, line: null },
+    });
     return;
   }
-  if (data.type !== "run") return;
+  // on the worker's global too, for modules the pattern imports: they're
+  // written for a page with a repo on it, and look for it there
+  self.repo = repo;
+  postMessage({ type: "started" });
+
   let error = null;
   let line = null;
   const __at = (at, value) => ((line = at), value);
