@@ -72,18 +72,90 @@ export function instrument(code) {
       depth--;
     },
   });
-  // applied from the end, so earlier positions stay put. where several land
-  // on one spot, the outer one has to end up in front when opening and
-  // behind when closing
+  // where several land on one spot, the outer one goes in front when opening
+  // and behind when closing
   inserts.sort(
     (a, b) =>
-      b.at - a.at ||
-      (a.open === b.open ? (a.open ? b.depth - a.depth : a.depth - b.depth) : a.open ? -1 : 1),
+      a.at - b.at ||
+      (a.open === b.open ? (a.open ? a.depth - b.depth : b.depth - a.depth) : a.open ? 1 : -1),
   );
-  for (const { at, text } of inserts) {
-    code = code.slice(0, at) + text + code.slice(at);
+
+  // put together front to back, keeping a source map as we go: nothing
+  // added has a newline, so each line maps to the same line, and only the
+  // columns move. the code's own text gets a mapping at every token (a
+  // mapping covers everything up to the next one, so fewer would land a
+  // breakpoint at the wrong spot); added text maps to where it was added
+  const lines = [[]];
+  let out = "";
+  let line = 0;
+  let lineStart = 0;
+  let generated = 0;
+  const map = (from) => lines[line].push([generated, line, from - lineStart]);
+  function original(from, to) {
+    for (const piece of code.slice(from, to).split(/(\n)/)) {
+      if (piece === "\n") {
+        out += "\n";
+        lines.push([]);
+        line++;
+        lineStart = from + 1;
+        generated = 0;
+        from++;
+        continue;
+      }
+      for (const token of piece.matchAll(/[\w$]+|\S/g)) {
+        lines[line].push([generated + token.index, line, from + token.index - lineStart]);
+      }
+      out += piece;
+      generated += piece.length;
+      from += piece.length;
+    }
   }
-  return code;
+  let at = 0;
+  for (const insert of inserts) {
+    original(at, insert.at);
+    at = insert.at;
+    map(at);
+    out += insert.text;
+    generated += insert.text.length;
+  }
+  original(at, code.length);
+
+  return { code: out, mappings: encodeMappings(lines) };
+}
+
+// a source map's mappings, from [generated column, original line, original
+// column] per line. each number is relative to the one before it, in base64
+// vlq
+function encodeMappings(lines) {
+  const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  function vlq(n) {
+    let value = n < 0 ? (-n << 1) | 1 : n << 1;
+    let text = "";
+    do {
+      let digit = value & 31;
+      value >>>= 5;
+      if (value) digit |= 32;
+      text += BASE64[digit];
+    } while (value);
+    return text;
+  }
+  let lastLine = 0;
+  let lastColumn = 0;
+  return lines
+    .map((segments) => {
+      let lastGenerated = 0;
+      return segments
+        .map(([generated, line, column]) => {
+          const text =
+            vlq(generated - lastGenerated) + "A" + vlq(line - lastLine) + vlq(column - lastColumn);
+          lastGenerated = generated;
+          lastLine = line;
+          lastColumn = column;
+          return text;
+        })
+        .join(",");
+    })
+    .join(";");
 }
 
 // where the code first stops making sense, for syntax errors (the engine
@@ -106,11 +178,21 @@ function snapshot(doc) {
 
 // run a knitout.js pattern: {knitout, error, ms}. the pattern can use
 // `repo.find(url)` to read other docs. aborting `signal` stops it
-export function compile(code, { repo, signal } = {}) {
+export function compile(code, { repo, signal, name } = {}) {
   const start = performance.now();
   let budgeted;
+  let sourceMap = null;
   try {
-    budgeted = instrument(code);
+    const instrumented = instrument(code);
+    budgeted = instrumented.code;
+    // so devtools shows (and steps through) the pattern as it was written
+    sourceMap = {
+      version: 3,
+      sources: [name || "pattern.knitout.js"],
+      sourcesContent: [code],
+      names: [],
+      mappings: instrumented.mappings,
+    };
   } catch {
     budgeted = code;
   }
@@ -159,6 +241,7 @@ export function compile(code, { repo, signal } = {}) {
     worker.postMessage({
       type: "run",
       code: budgeted,
+      sourceMap,
       // where the pattern's imports are found from: the page, not this file
       base: location.href,
       loopBudget: LOOP_BUDGET,
@@ -175,7 +258,7 @@ export function compile(code, { repo, signal } = {}) {
 // for that)
 export async function runInto(jsHandle, kHandle, repo, { signal } = {}) {
   const code = docText(jsHandle.doc());
-  const result = await compile(code, { repo, signal });
+  const result = await compile(code, { repo, signal, name: jsHandle.doc()?.name });
   // a build that failed leaves the .k as it was
   if (result.error) return result;
   kHandle.change((doc) => {

@@ -44,6 +44,24 @@ async function calibrateSourceLineOffset() {
 	return _sourceLineOffset
 }
 
+//patchwork: options.sourceMap leads from the code as it runs back to the code
+//as written. its lines count from the code's first line, so they're moved
+//down past the lines the `new Function` wrapper adds before it
+function sourceMapComment(sourceMap, lineOffset) {
+	if (!sourceMap) return ""
+	const map = {
+		...sourceMap,
+		file: PATTERN_URL,
+		mappings: ";".repeat(lineOffset) + sourceMap.mappings,
+	}
+	const bytes = new TextEncoder().encode(JSON.stringify(map))
+	let binary = ""
+	for (let i = 0; i < bytes.length; i += 0x8000) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+	}
+	return `\n//# sourceMappingURL=data:application/json;base64,${btoa(binary)}`
+}
+
 //knitout frontend
 //patchwork: options.globals are passed to the code as extra arguments (e.g. a
 //loop budget check), options.onError gets the error if the code throws, and
@@ -868,15 +886,17 @@ Writer.prototype.getNeedleBed = function(needleNum){
 	}
 
 	try {
+		//patchwork: the code starts a line of its own (no indent), so a source
+		//map's columns for it still hold on its first line
 		const run = new Function(
 			"require",
 			"console",
 			...Object.keys(globals),
 			`
 			return (async () => {
-				${codeText}
+${codeText}
 			})();
-			//# sourceURL=${PATTERN_URL}`
+			//# sourceURL=${PATTERN_URL}${sourceMapComment(options.sourceMap, sourceLineOffset)}`
 		)
 
 		await run(require, captureConsole, ...Object.values(globals))

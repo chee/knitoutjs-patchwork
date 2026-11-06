@@ -3,7 +3,8 @@ import { evalJS } from "./vendor/evalJS.js";
 // runs one knitout.js pattern off the page's thread, so a pattern that never
 // ends can't freeze anything: the page just stops this worker.
 //
-// in:  {type: "run", code, base, loopBudget, timeBudget}   (loops already counted)
+// in:  {type: "run", code, sourceMap, base, loopBudget, timeBudget}
+//      (loops already counted; sourceMap leads back to the code as written)
 //      {type: "doc", id, doc} | {type: "missing", id, message}
 // out: {type: "done", knitout, error: {message, line} | null}
 //      {type: "find", id, url}
@@ -65,6 +66,7 @@ onmessage = async ({ data }) => {
     return import(url);
   };
   const knitout = await evalJS(data.code, {
+    sourceMap: data.sourceMap,
     globals: { __loop: loopCounter(data.loopBudget, data.timeBudget), __at, __import, repo },
     currentLine: () => line,
     onError: (e, at) =>
