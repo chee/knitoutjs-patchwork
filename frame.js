@@ -363,9 +363,9 @@ export default function KnitoutFrameTool(handle, element) {
 
   const toolContext = {
     repo,
-    open: (url, toolElement, edge) => reveal(url, panelOf(toolElement), edge),
-    openIfClosed: (url, toolElement, edge) =>
-      findPanelShowing(layout.root, url) || reveal(url, panelOf(toolElement), edge),
+    open: (url, toolElement, edge, toolId) => reveal(url, panelOf(toolElement), edge, toolId),
+    openIfClosed: (url, toolElement, edge, toolId) =>
+      findPanelShowing(layout.root, url) || reveal(url, panelOf(toolElement), edge, toolId),
     editableCopy: (url, toolElement) => editableCopy({ id: panelOf(toolElement), url }),
     get events() {
       return root;
@@ -845,7 +845,9 @@ export default function KnitoutFrameTool(handle, element) {
           title="open a file here, or start a new pattern"
           onClick=${(event) => openMenu(event, group.id)}
         >
-          +
+          <svg aria-hidden="true" viewBox="0 0 12 12" width="12" height="12">
+            <path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
         </button>
       </header>
       ${() => {
@@ -946,37 +948,43 @@ export default function KnitoutFrameTool(handle, element) {
       onPointerEnter=${() => setHovered(panel.url)}
       onPointerLeave=${unhover}
     >
-      <span class="knitoutjs-swatch"></span>
-      ${() =>
-        renaming()
-          ? html`<input
-              class="knitoutjs-rename"
-              value=${info.name}
-              ref=${(el) => queueMicrotask(() => (el.focus(), el.select()))}
-              onKeyDown=${onKeyDown}
-              onBlur=${(event) => rename(event.currentTarget.value)}
-              onClick=${(event) => event.stopPropagation()}
-            />`
-          : html`<span
-              class="knitoutjs-tab-name"
-              title="double click to rename"
-              onDblClick=${() => setRenaming(true)}
-            >
-              ${() => info.name}
-            </span>`}
-      <button
-        class="knitoutjs-tab-tool"
-        aria-haspopup="menu"
-        title="what it's shown with: change it here, or open it with something else in a new tab"
-        onClick=${(event) => {
-          event.stopPropagation();
-          updateLayout((tree) => activate(tree, group.id, panel.id));
-          openToolMenu(event, panel, group.id);
-        }}
-      >
-        ${() => toolName(panel)}
-        <span aria-hidden="true">▾</span>
-      </button>
+      <span class="knitoutjs-tab-pill">
+        <span class="knitoutjs-tab-title">
+          <span class="knitoutjs-swatch"></span>
+          ${() =>
+            renaming()
+              ? html`<input
+                  class="knitoutjs-rename"
+                  value=${info.name}
+                  ref=${(el) => queueMicrotask(() => (el.focus(), el.select()))}
+                  onKeyDown=${onKeyDown}
+                  onBlur=${(event) => rename(event.currentTarget.value)}
+                  onClick=${(event) => event.stopPropagation()}
+                />`
+              : html`<span
+                  class="knitoutjs-tab-name"
+                  title="double click to rename"
+                  onDblClick=${() => setRenaming(true)}
+                >
+                  ${() => info.name}
+                </span>`}
+        </span>
+        <button
+          class="knitoutjs-tab-tool"
+          aria-haspopup="menu"
+          title="what it's shown with: change it here, or open it with something else in a new tab"
+          onClick=${(event) => {
+            event.stopPropagation();
+            updateLayout((tree) => activate(tree, group.id, panel.id));
+            openToolMenu(event, panel, group.id);
+          }}
+        >
+          <span class="knitoutjs-tab-tool-name">${() => toolName(panel)}</span>
+          <svg class="knitoutjs-tab-tool-arrow" aria-hidden="true" viewBox="0 0 10 6" width="10" height="6">
+            <path d="M0 0h10L5 6z" fill="currentColor" />
+          </svg>
+        </button>
+      </span>
       <button
         class="knitoutjs-close"
         title="close"
@@ -985,7 +993,9 @@ export default function KnitoutFrameTool(handle, element) {
           updateLayout((tree) => removePanel(tree, panel.id));
         }}
       >
-        ×
+        <svg aria-hidden="true" viewBox="0 0 10 10" width="10" height="10">
+          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        </svg>
       </button>
     </div>`;
   }

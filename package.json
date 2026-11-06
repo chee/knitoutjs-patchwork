@@ -1,5 +1,5 @@
 {
-	"name": "@patchwork/knitoutjs-panes",
+	"name": "@patchwork/prototype-knitoutjs-panes",
 	"version": "0.0.2",
 	"type": "module",
 	"main": "./index.js",

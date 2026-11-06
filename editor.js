@@ -39,7 +39,8 @@ function identifierFor(name) {
  * - events: where visualizer events arrive and selection highlights go
  * - project: { files() → [{url, name, extension}], createFile(name) → url }
  * - hover(url | null): light up the panes showing a doc
- * - open(url, element, edge): show a doc beside this one (or bring it forward)
+ * - open(url, element, edge, toolId?): show a doc beside this one (or bring
+ *   it forward); with a tool to open it with, else the file's first
  * - openIfClosed(url, element, edge): show a doc beside this one, unless it's
  *   showing somewhere already
  * - editableCopy(url, element): copy a generated .k as text you can edit
@@ -357,9 +358,9 @@ export default function KnitoutEditorTool(handle, element, context) {
       </label>
       <button
         class="knitoutjs-open"
-        title="show that .k file beside this one"
+        title="show that .k file's text beside this one"
         disabled=${() => !run.target()}
-        onClick=${() => open(run.target(), element, "right")}
+        onClick=${() => open(run.target(), element, "right", "editor")}
       >
         open
       </button>
