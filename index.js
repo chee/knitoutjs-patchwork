@@ -1,6 +1,6 @@
-import defaultJavaScriptContent from "./default-source.js";
+import defaultJavaScriptContent from "./core/default-source.js";
 import { newFileDoc } from "./files.js";
-import { newPanel, newGroup, newSplit } from "./layout.js";
+import { newPanel, newGroup, newSplit } from "./core/layout.js";
 
 export const KnitoutJSDatatype = {
   // patchwork calls this inside handle.change without waiting for it, so
@@ -22,7 +22,7 @@ export const KnitoutJSDatatype = {
     ]);
 
     // fill the .k, so the visualizer has stitches the first time you look
-    import("./run.js").then(({ runInto }) => runInto(js, k, repo));
+    import("./core/run.js").then(({ runInto }) => runInto(js, k, repo));
   },
 
   getTitle(doc) {
@@ -63,7 +63,7 @@ export const plugins = [
     supportedDatatypes: ["file"],
     async load() {
       const { default: KnitoutVisualizerTool } = await import(
-        "./visualizer.js"
+        "./core/visualizer.js"
       );
       return KnitoutVisualizerTool;
     },

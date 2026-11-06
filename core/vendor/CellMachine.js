@@ -250,6 +250,7 @@ function CellMachine() {
 	this.racking = 0.0; //<-- racking, N or N + 0.25
 
 	this.defaultStyles = {};
+	this.yarnColours = null; //<-- colours for carriers 1, 2, 3...; set before parsing
 	this.currentSource = ""; //<-- current source line from ;!source: comments; will be passed 
 };
 
@@ -952,9 +953,11 @@ CellMachine.prototype.source = function CellMachine_source(source) {
 };
 
 CellMachine.prototype.setCarriers = function CellMachine_setCarriers(carriers) {
+	const yarns = this.yarnColours || [];
 	function makeStyle(cn, ci, total) {
 		const palette = ['#e06666', '#e0a866', '#ffffff', '#7dbf7d', '#6699cc', '#a88cc9'];
-		return { color: palette[ci % palette.length] };
+		// carrier n in the colour picked for it, if there is one (see yarns.js)
+		return { color: yarns[Number(cn) - 1] || palette[ci % palette.length] };
 	}
 
 	console.assert(this.carriers.length === 0, "Shouldn't set carriers twice.");

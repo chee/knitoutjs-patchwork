@@ -1,0 +1,178 @@
+/* one swatch for each carrier, in its yarn's colour (see yarns.js) */
+.yarn-picker {
+	display: flex;
+	gap: 3px;
+}
+
+.yarn-chip {
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 1px solid var(--knitoutjs-line, currentColor);
+	border-radius: 50%;
+	background: var(--yarn);
+	color: var(--knitoutjs-sheet, #fff);
+	font: 600 10px var(--knitoutjs-mono, ui-monospace, monospace);
+	cursor: pointer;
+
+	&:hover {
+		translate: 0 -1px;
+		box-shadow: 0 1px 0 var(--knitoutjs-line, currentColor);
+	}
+}
+
+/* two strands: held together, half each, across; plated, the first on the
+   face, over the second behind it */
+.yarn-chip.two {
+	background: linear-gradient(135deg, var(--yarn) 50%, var(--yarn-2) 50%);
+}
+
+.yarn-chip.two.plated {
+	background: radial-gradient(circle, var(--yarn) 45%, var(--yarn-2) 47%);
+}
+
+.yarn-chip[aria-expanded="true"] {
+	outline: 2px solid var(--knitoutjs-accent, currentColor);
+	outline-offset: 1px;
+}
+
+/* a carrier's popover: its strand or strands, and how they're fed */
+.yarn-popover[popover] {
+	position: fixed;
+	inset: auto;
+	width: 220px;
+	margin: 0;
+	padding: 8px;
+	border: 1px solid var(--knitoutjs-line, currentColor);
+	border-radius: var(--knitoutjs-radius, 3px);
+	background: var(--knitoutjs-sheet, Canvas);
+	box-shadow: 2px 2px 0 var(--knitoutjs-line, currentColor);
+	color: var(--knitoutjs-ink, CanvasText);
+	font: 12px/1.4 var(--knitoutjs-sans, system-ui, sans-serif);
+}
+
+.yarn-popover:popover-open {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.yarn-heading {
+	font-weight: 600;
+}
+
+.yarn-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+
+	&[hidden] {
+		display: none;
+	}
+
+	& label {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+		cursor: pointer;
+	}
+}
+
+.yarn-swatch {
+	flex: none;
+	width: 28px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--knitoutjs-line, currentColor);
+	border-radius: var(--knitoutjs-radius, 3px);
+	background: none;
+	cursor: pointer;
+
+	&::-webkit-color-swatch-wrapper {
+		padding: 0;
+	}
+
+	&::-webkit-color-swatch {
+		border: none;
+		border-radius: 2px;
+	}
+
+	&::-moz-color-swatch {
+		border: none;
+		border-radius: 2px;
+	}
+}
+
+.yarn-hex {
+	margin-left: auto;
+	color: var(--knitoutjs-muted, currentColor);
+	font: 11px var(--knitoutjs-mono, ui-monospace, monospace);
+}
+
+.yarn-button {
+	padding: 3px 8px;
+	border: 1px solid var(--knitoutjs-line, currentColor);
+	border-radius: var(--knitoutjs-radius, 3px);
+	background: var(--knitoutjs-chrome, transparent);
+	color: var(--knitoutjs-chrome-ink, currentColor);
+	font: inherit;
+	cursor: pointer;
+
+	&:hover {
+		background: var(--knitoutjs-chrome-hover, transparent);
+	}
+
+	&[hidden] {
+		display: none;
+	}
+}
+
+.yarn-remove {
+	padding: 0 6px;
+	line-height: 20px;
+}
+
+.yarn-add {
+	align-self: flex-start;
+}
+
+/* held together | plated */
+.yarn-feed {
+	display: flex;
+
+	&[hidden] {
+		display: none;
+	}
+
+	& .yarn-button {
+		flex: 1;
+		border-radius: 0;
+
+		&:first-child {
+			border-radius: var(--knitoutjs-radius, 3px) 0 0 var(--knitoutjs-radius, 3px);
+		}
+
+		&:last-child {
+			margin-left: -1px;
+			border-radius: 0 var(--knitoutjs-radius, 3px) var(--knitoutjs-radius, 3px) 0;
+		}
+
+		&[aria-checked="true"] {
+			background: var(--knitoutjs-accent, CanvasText);
+			color: var(--knitoutjs-accent-ink, Canvas);
+		}
+	}
+}
+
+.yarn-reset {
+	align-self: flex-start;
+	border-color: transparent;
+	background: none;
+	color: var(--knitoutjs-muted, currentColor);
+
+	&:hover {
+		border-color: var(--knitoutjs-line, currentColor);
+	}
+}

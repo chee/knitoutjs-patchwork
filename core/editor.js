@@ -3,10 +3,11 @@ import { render } from "solid-js/web";
 import html from "solid-js/html";
 import { Prec, Transaction } from "@codemirror/state";
 import { EditorView, keymap, ViewPlugin } from "@codemirror/view";
-import { knitoutEditorIntegration, showError } from "./cm-knitout.js";
+import { goToLine as goToLineIn, knitoutEditorIntegration, showError } from "./cm-knitout.js";
 import { docColour, docText, fileExtension } from "./files.js";
 import { runInto } from "./run.js";
 import { builderOf, setBuild } from "./builds.js";
+import { icon } from "./icons.js";
 
 const AUTO_RUN_DELAY = 600;
 
@@ -231,15 +232,7 @@ export default function KnitoutEditorTool(handle, element, context) {
     }
 
     function goToLine(lineNumber) {
-      if (!view) return;
-      const line = view.state.doc.line(
-        Math.max(1, Math.min(lineNumber, view.state.doc.lines)),
-      );
-      view.dispatch({
-        selection: { anchor: line.from },
-        effects: EditorView.scrollIntoView(line.from, { y: "center" }),
-      });
-      view.focus();
+      if (view) goToLineIn(view, lineNumber);
     }
 
     function keep() {
@@ -288,7 +281,7 @@ export default function KnitoutEditorTool(handle, element, context) {
         : "build the pattern: it writes its knitout into the .k file chosen on the right (⌘↵)"}
         onClick=${() => (run.running() ? run.stop() : run.now())}
       >
-        ${() => (run.running() ? "stop" : "build")}
+        ${() => (run.running() ? [icon("stop"), " stop"] : [icon("build"), " build"])}
       </button>
       <label
         class="knitoutjs-auto"
@@ -308,7 +301,7 @@ export default function KnitoutEditorTool(handle, element, context) {
             title="go to this line"
             onClick=${() => run.goToLine(run.status().line)}
           >
-            ⚠ line ${() => run.status().line}:
+            ${icon("warning")} line ${() => run.status().line}:
           </button>
         <//>
         ${() =>
@@ -336,7 +329,7 @@ export default function KnitoutEditorTool(handle, element, context) {
         onPointerEnter=${() => hover(run.target())}
         onPointerLeave=${() => hover(null)}
       >
-        <span class="knitoutjs-target-label">writes to →</span>
+        <span class="knitoutjs-target-label">writes to ${icon("arrow-right")}</span>
         <span class="knitoutjs-swatch"></span>
         <select onChange=${onPick}>
           <option value="" disabled selected=${() => !run.target()}>
@@ -362,7 +355,7 @@ export default function KnitoutEditorTool(handle, element, context) {
         disabled=${() => !run.target()}
         onClick=${() => open(run.target(), element, "right", "editor")}
       >
-        open
+        ${icon("beside")} open
       </button>
     </div>`;
   }
@@ -381,7 +374,7 @@ export default function KnitoutEditorTool(handle, element, context) {
       >
         <div class="knitoutjs-readonly">
           <span>
-                read only: ${() =>
+                ${icon("lock")} read only: ${() =>
                   writer() ?? "a pattern"} writes this file each
                 time it's built
               </span>
@@ -390,7 +383,7 @@ export default function KnitoutEditorTool(handle, element, context) {
             title="make a copy of this .k as text you can change by hand"
             onClick=${() => editableCopy(handle.url, element)}
           >
-                make an editable copy
+                ${icon("pencil")} make an editable copy
               </button>
         </div>
         <//>

@@ -31,9 +31,9 @@ import {
   removePanel,
   setTool,
   activate,
-} from "./layout.js";
-import defaultSource from "./default-source.js";
-import { builds, setBuild } from "./builds.js";
+} from "./core/layout.js";
+import defaultSource from "./core/default-source.js";
+import { builds, setBuild } from "./core/builds.js";
 
 const STYLESHEET = new URL("./frame.css", import.meta.url).href;
 
@@ -278,7 +278,7 @@ export default function KnitoutFrameTool(handle, element) {
     const builder = builds[jsUrl]?.builder;
     if (builder) return builder.now();
     const [{ runInto }, jsHandle, kHandle] = await Promise.all([
-      import("./run.js"),
+      import("./core/run.js"),
       repo.find(jsUrl),
       repo.find(kUrl),
     ]);
@@ -479,7 +479,7 @@ export default function KnitoutFrameTool(handle, element) {
     ]);
     updateLayout((tree) => addRow(tree, row));
     const [{ runInto }, jsHandle, kHandle] = await Promise.all([
-      import("./run.js"),
+      import("./core/run.js"),
       repo.find(js),
       repo.find(k),
     ]);

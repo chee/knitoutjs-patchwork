@@ -6,7 +6,7 @@ import {highlighter} from "./stitch-source.js"
 // offscreen canvas so show-knitout handles them as if they were its own.
 //
 // in:  {type: "init", canvas, size} · {type: "resize", size}
-//      {type: "parse", id, text, resetView} · {type: "highlight", lines}
+//      {type: "parse", id, text, resetView, yarns} · {type: "highlight", lines}
 //      {type: "resetZoom"} · {type: "event", event: {type, ...fields}}
 // out: {type: "ready"} · {type: "parsed", id} · {type: "error", id, message}
 //      {type: "hover", source, stitch} · {type: "goto", source}
@@ -32,6 +32,7 @@ onmessage = async ({data}) => {
 		size = data.size
 		show.requestDraw()
 	} else if (data.type === "parse") {
+		show.yarnColours = data.yarns
 		try {
 			await show.parse(data.text, false, data.resetView)
 			postMessage({type: "parsed", id: data.id})

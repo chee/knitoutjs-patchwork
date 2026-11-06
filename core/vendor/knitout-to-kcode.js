@@ -221,6 +221,8 @@ function Pass(info) {
 	if (!('slots' in this)) this.slots = {};
 	if (!('sizes' in this)) this.sizes = {};
 	if (!('carriers' in this)) this.carriers = [];
+	//lattice: the knitout lines (1-based) that made this pass
+	this.lines = [];
 
 	//Check that specification was reasonable:
 	console.assert('type' in this, "Can't specify a pass without a type.");
@@ -565,6 +567,12 @@ function knitoutToPasses(knitout) {
 		return slotNumber(bn).toString();
 	}
 
+	//lattice: remember which line of the knitout each pass came from
+	function addLine(pass) {
+		const line = lineIdx + 1;
+		if (pass.lines[pass.lines.length-1] !== line) pass.lines.push(line);
+	}
+
 	function merge(pass, shouldNotKick) {
 		let doPause = pausePending;
 		pausePending = false;
@@ -572,6 +580,7 @@ function knitoutToPasses(knitout) {
 		endPending = false;
 		if (passes.length !== 0 && !doPause && !doEnd && passes[passes.length-1].append(pass)) {
 			//great; pass was able to merge into existing pass no problem.
+			addLine(passes[passes.length-1]);
 		} else {
 			//need to start a new pass:
 
@@ -679,6 +688,7 @@ function knitoutToPasses(knitout) {
 					pass.pauseMessage = pauseMessage;
 					doPause = false;
 				}
+				addLine(pass);
 				passes.push(pass);
 			}
 		}
@@ -1133,7 +1143,21 @@ function knitoutToPasses(knitout) {
 
 //convert passes to kcode, reading values from headers:
 // returns kcode as a string
-function passesToKCode(headers, passes, kcFile) {
+//lattice: "12-14,20" for lines [12, 13, 14, 20]
+function lineRanges(lines) {
+	const sorted = [...new Set(lines)].sort((a, b) => a - b);
+	const ranges = [];
+	for (const line of sorted) {
+		const last = ranges[ranges.length-1];
+		if (last && line === last[1] + 1) last[1] = line;
+		else ranges.push([line, line]);
+	}
+	return ranges.map(([a, b]) => a === b ? `${a}` : `${a}-${b}`).join(",");
+}
+
+//options.lines (lattice): write a "// lines 12-14" comment before each pass,
+//saying which lines of the knitout made it
+function passesToKCode(headers, passes, kcFile, options = {}) {
 
 	//compute minimum and maximum slots both for each pass and for the program as a whole:
 	let minSlot = Infinity;
@@ -1327,6 +1351,7 @@ function passesToKCode(headers, passes, kcFile) {
 					carriageRight:-Infinity, //will get updated
 				};
 				if (pass.comment) xpass.comment = pass.comment;
+				xpass.lines = pass.lines;
 				if (pass.pause && pass.pauseMessage) xpass.pauseMessage = pass.pauseMessage;
 				if (typeof(comment) !== 'undefined') {
 					if ('comment' in xpass) xpass.comment += ' ' + comment;
@@ -1499,6 +1524,7 @@ function passesToKCode(headers, passes, kcFile) {
 				roller: pass.roller,
 			};
 			if (pass.comment) kpass.comment = pass.comment; //TODO: add header for pause/alert on screen
+			kpass.lines = pass.lines;
 			if (pass.pause && pass.pauseMessage) kpass.pauseMessage = pass.pauseMessage;
 			if (pass.gripper === GRIPPER_OUT) {
 				kpass.comment = (kpass.comment || "") + "; carrier out";
@@ -1675,6 +1701,9 @@ function passesToKCode(headers, passes, kcFile) {
 		if ('comment' in kpass) {
 			out("// " + kpass.comment);
 		}
+		if (options.lines && kpass.lines && kpass.lines.length) {
+			out("// lines " + lineRanges(kpass.lines));
+		}
 		if (kpass.RACK != lastRACK) {
 			out("RACK:" + kpass.RACK);
 			lastRACK = kpass.RACK;
@@ -1730,6 +1759,16 @@ function passesToKCode(headers, passes, kcFile) {
 	return kcode.join("\n") + "\n";
 }
 
+
+//lattice: like convertKnitout, but throws what went wrong
+//(the x-carrier-* settings are kept between files: start each one afresh)
+export function knitoutToKcode(text, filename, options) {
+	carrierSpacing = 2;
+	carrierDistance = 2.5;
+	leftFloor = rightFloor = true;
+	const {headers, passes} = knitoutToPasses(text);
+	return passesToKCode(headers, passes, filename, options);
+}
 
 export async function convertKnitout(text, filename) {
 	let kcode = '';

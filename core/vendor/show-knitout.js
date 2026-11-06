@@ -501,6 +501,7 @@ ShowKnitout.prototype.parse = async function ShowKnitout_parse(codeText, useKnit
 		if (stale()) return;
 
 		const machine = new CellMachine();
+		machine.yarnColours = this.yarnColours;
 		try {
 			const result = await parseKnitout(codeText, machine, useKnitoutAsSource, {
 				isCancelled: stale,
