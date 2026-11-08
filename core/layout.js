@@ -657,3 +657,33 @@ export function float(nodes, id, rect) {
     return id;
   });
 }
+
+// a floating panel back in the tiles: a tab in the group `targetId`, if
+// that's tiled, or else in the first tiled group. with nothing tiled, it's
+// the whole of the tiles (its group with it, if it was the only tab)
+export function dock(nodes, panelId, targetId) {
+  edit(nodes, () => {
+    const panel = nodes[panelId];
+    if (panel?.type !== "panel") return;
+    const [root] = tops(nodes);
+    const topOf = (id) => {
+      while (nodes[id]?.parent != null) id = nodes[id].parent;
+      return id;
+    };
+    if (root && topOf(panelId) === root) return;
+    if (root) {
+      const target = groupOrNode(nodes, targetId);
+      const tiled = nodes[target]?.type === "group" && topOf(target) === root;
+      append(nodes, panelId, tiled ? target : firstGroup(nodes));
+      return;
+    }
+    const group = nodes[panel.parent];
+    if (group.parent === null && (childrenOf(nodes).get(panel.parent) ?? []).length === 1) {
+      put(group, "float", undefined);
+      return;
+    }
+    const made = addAtTop(nodes, newGroup([])).root;
+    put(panel, "parent", made);
+    put(panel, "order", between(null, null));
+  });
+}

@@ -1,7 +1,7 @@
 // latticework: a project's panes, and its files down the side. what each
 // app's project tool shows, and what lattice's frame has in its middle
 import { createSignal, createMemo, createEffect, on, onCleanup, For, Show } from "solid-js";
-import { createStore, reconcile, produce } from "solid-js/store";
+import { createStore, reconcile } from "solid-js/store";
 import { render } from "solid-js/web";
 import html from "solid-js/html";
 import { isValidAutomergeUrl } from "@automerge/automerge-repo/slim";
@@ -18,6 +18,7 @@ import defaultSource from "./default-source.js";
 import { Resizer, sidebarState } from "./sidebars.js";
 import { icon } from "./icons.js";
 import { builds, setBuild } from "./builds.js";
+import { readActive, writeActive, activeChannel } from "./active.js";
 
 const STYLESHEET = new URL("./latticework.css", import.meta.url).href;
 
@@ -49,6 +50,38 @@ const EDGE = 0.22;
 const MAX_EDGE = 64;
 const CODE_EDGE = 28;
 const OUTER_EDGE = 10;
+
+// a drag goes out to everyone else looking this often, and again now and
+// then while it's held still. theirs shows until the doc has it, or until
+// they've been quiet this long (their page shut mid-drag, say)
+const LIVE_EVERY = 33;
+const LIVE_QUIET = 4000;
+
+// a floating window: how small it gets, how much of it stays in reach, and
+// the edges and corners it's sized by
+const FLOAT_MIN = { w: 200, h: 120 };
+const FLOAT_REACH = { x: 80, y: 34 };
+const FLOAT_EDGES = ["n", "e", "s", "w", "ne", "se", "sw", "nw"];
+
+// a node's fields while it's dragged: its size (a divider) or where it
+// floats. anything else that comes over broadcast is ignored
+const numbers = (value, keys) =>
+  !!value && typeof value === "object" && keys.every((key) => Number.isFinite(value[key]));
+function liveFields(fields) {
+  const out = {};
+  const size = fields?.size;
+  if (numbers(size, ["flex"]) || numbers(size, ["px"])) out.size = { ...size };
+  if (numbers(fields?.float, ["x", "y", "w", "h", "z"])) out.float = { ...fields.float };
+  return Object.keys(out).length ? out : null;
+}
+
+// two sizes or two floats are the same
+function sameFields(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  const keys = Object.keys(b);
+  return keys.length === Object.keys(a).length && keys.every((key) => a[key] === b[key]);
+}
 
 // what can be dragged in: our own tabs, the tools in a tab's tool menu (to
 // open that file with that tool somewhere else), and docs from the sidebar
@@ -101,18 +134,6 @@ function* groupsIn(node) {
   if (!node) return;
   if (node.type === "group") yield node;
   else for (const child of node.children) yield* groupsIn(child);
-}
-
-// a group or split in a read tree, by id
-function nodeIn(node, id) {
-  if (!node) return null;
-  if (node.id === id) return node;
-  if (node.type !== "split") return null;
-  for (const child of node.children) {
-    const found = nodeIn(child, id);
-    if (found) return found;
-  }
-  return null;
 }
 
 // a cell's flex, from its node's size: a share of what's left, or fixed
@@ -180,8 +201,30 @@ export function mountLatticework(
   const [fileUrls, setFileUrls] = createSignal([]);
   const [projectName, setProjectName] = createSignal("");
 
+  // what's being dragged right now, here or by anyone else looking: {[node
+  // id]: {fields: {size} or {float}, until}}. it's shown over the doc until
+  // the doc has it too, or until it lapses
+  const live = new Map();
+  let lapse = null;
+
   function readLayout() {
-    setLayout(reconcile(Layout.read(layoutHandle.doc()?.nodes), { key: "id" }));
+    const nodes = layoutHandle.doc()?.nodes ?? {};
+    const shown = { ...nodes };
+    const now = Date.now();
+    let soonest = Infinity;
+    for (const [id, { fields, until }] of live) {
+      const node = nodes[id];
+      const caughtUp = node && Object.entries(fields).every(([key, value]) => sameFields(node[key], value));
+      if (!node || caughtUp || until <= now) {
+        live.delete(id);
+        continue;
+      }
+      shown[id] = { ...node, ...fields };
+      soonest = Math.min(soonest, until);
+    }
+    clearTimeout(lapse);
+    if (soonest < Infinity) lapse = setTimeout(readLayout, soonest - now + 10);
+    setLayout(reconcile(Layout.read(shown), { key: "id" }));
   }
   function readFiles() {
     setFileUrls(files.urls());
@@ -214,12 +257,25 @@ export function mountLatticework(
     return null;
   }
 
-  // which tab each group is showing. it's this page's, not the doc's
-  const [active, setActive] = createStore({});
+  // which tab each group is showing. it's this browser's, not the doc's
+  // (active.js): remembered for next time, and this browser's other tabs
+  // follow along
+  const [active, setActive] = createStore(readActive(layoutHandle.url));
   const activeIn = (group) => group.panels.find((panel) => panel.id === active[group.id]) ?? group.panels[0];
+  const tabChannel = activeChannel(layoutHandle.url, (groupId, panelId) => setActive(groupId, panelId));
+
+  function showTab(groupId, panelId) {
+    if (!groupId || !panelId || active[groupId] === panelId) return;
+    setActive(groupId, panelId);
+    tabChannel.post(groupId, panelId);
+    // only what still points at a tab in its group
+    const nodes = layoutHandle.doc()?.nodes ?? {};
+    const kept = {};
+    for (const [group, panel] of Object.entries(active)) if (nodes[panel]?.parent === group) kept[group] = panel;
+    writeActive(layoutHandle.url, kept);
+  }
   function activate(panelId) {
-    const groupId = layoutHandle.doc()?.nodes?.[panelId]?.parent;
-    if (groupId) setActive(groupId, panelId);
+    showTab(layoutHandle.doc()?.nodes?.[panelId]?.parent, panelId);
   }
 
   const addFiles = (urls) => files.add(urls);
@@ -402,7 +458,7 @@ export function mountLatticework(
     if (!url) return;
     const showing = findShowing(url);
     if (showing) {
-      setActive(showing.group.id, showing.panel.id);
+      showTab(showing.group.id, showing.panel.id);
     } else {
       const doc = (await repo.find(url)).doc();
       const tool = toolId ?? toolsFor(fileExtension(doc))[0].id;
@@ -850,12 +906,88 @@ export function mountLatticework(
     );
   }
 
-  // ── resizing: the two cells either side of a divider, shown as you drag
-  //    and written when you let go. a fixed one stays fixed (in px), and two
-  //    flexible ones share what they had between them
+  // ── live drags: a divider or a floating window, shown as it goes, here
+  //    and to everyone else looking (over the layout doc's broadcast), and
+  //    written to the doc once, when it's let go of
 
+  // what's being dragged here: a divider's direction, "move", or the edge a
+  // floating window's being sized by. it sets the cursor
   const [resizing, setResizing] = createSignal(null);
 
+  const me = Layout.newId();
+  let sent = 0;
+  let outgoing = {};
+  let sendTimer = null;
+
+  function send() {
+    clearTimeout(sendTimer);
+    sendTimer = null;
+    if (!Object.keys(outgoing).length) return;
+    try {
+      layoutHandle.broadcast({ latticework: "drag", from: me, n: ++sent, nodes: outgoing });
+    } catch {}
+    outgoing = {};
+  }
+
+  // theirs. messages can come out of order, so an older one is dropped
+  const heard = new Map();
+  function onDragMessage({ message }) {
+    if (message?.latticework !== "drag" || typeof message.from !== "string" || message.from === me) return;
+    if (!(message.n > (heard.get(message.from) ?? 0))) return;
+    heard.set(message.from, message.n);
+    const until = Date.now() + LIVE_QUIET;
+    for (const [id, fields] of Object.entries(message.nodes ?? {})) {
+      const checked = liveFields(fields);
+      if (checked) live.set(id, { fields: checked, until });
+    }
+    readLayout();
+  }
+  layoutHandle.on("ephemeral-message", onDragMessage);
+
+  // a drag from `event`'s pointer: fieldsAt(event) says what the nodes are
+  // now ({[id]: {size} or {float}}), and write(nodes, fields) puts that in
+  // the doc when it's let go of
+  function dragLive(event, cursor, fieldsAt, write) {
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    setResizing(cursor);
+    let fields = null;
+    // held still, it still goes out now and then, so it doesn't lapse
+    const beat = setInterval(() => {
+      if (fields) Object.assign(outgoing, fields), send();
+    }, LIVE_QUIET / 3);
+
+    function onMove(event) {
+      fields = fieldsAt(event);
+      for (const [id, each] of Object.entries(fields)) live.set(id, { fields: each, until: Infinity });
+      readLayout();
+      Object.assign(outgoing, fields);
+      sendTimer ??= setTimeout(send, LIVE_EVERY);
+    }
+
+    function onUp() {
+      clearInterval(beat);
+      setResizing(null);
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+      target.removeEventListener("pointercancel", onUp);
+      if (!fields) return;
+      send();
+      for (const id of Object.keys(fields)) {
+        const entry = live.get(id);
+        if (entry) entry.until = Date.now() + LIVE_QUIET;
+      }
+      updateLayout((nodes) => write(nodes, fields));
+      readLayout();
+    }
+
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+    target.addEventListener("pointercancel", onUp);
+  }
+
+  // a divider: the two cells either side of it. a fixed one stays fixed (in
+  // px), and two flexible ones share what they had between them
   function startResize(event, split, left) {
     if (event.button !== 0) return;
     const resizer = event.currentTarget;
@@ -870,10 +1002,6 @@ export function mountLatticework(
     const sizeA = { ...a.size };
     const sizeB = { ...b.size };
     const start = row ? event.clientX : event.clientY;
-    let next = null;
-
-    resizer.setPointerCapture(event.pointerId);
-    setResizing(row ? "row" : "column");
 
     function sizesFor(lengthOfA) {
       const lengthOfB = pair - lengthOfA;
@@ -886,30 +1014,119 @@ export function mountLatticework(
       return [{ flex: (flex * lengthOfA) / pair }, { flex: (flex * lengthOfB) / pair }];
     }
 
-    function onMove(event) {
-      const delta = (row ? event.clientX : event.clientY) - start;
-      next = sizesFor(Math.min(Math.max(lengthA + delta, lowest), Math.max(lowest, highest)));
-      setLayout(
-        produce((state) => {
-          const node = [state.root, ...state.floats].map((tree) => nodeIn(tree, split.id)).find(Boolean);
-          if (!node) return;
-          node.children[left].size = next[0];
-          node.children[left + 1].size = next[1];
-        }),
-      );
-    }
+    dragLive(
+      event,
+      row ? "row" : "column",
+      (event) => {
+        const delta = (row ? event.clientX : event.clientY) - start;
+        const [one, two] = sizesFor(Math.min(Math.max(lengthA + delta, lowest), Math.max(lowest, highest)));
+        return { [a.id]: { size: one }, [b.id]: { size: two } };
+      },
+      (nodes, fields) => Layout.resize(nodes, { [a.id]: fields[a.id].size, [b.id]: fields[b.id].size }),
+    );
+  }
 
-    function onUp() {
-      setResizing(null);
-      resizer.removeEventListener("pointermove", onMove);
-      resizer.removeEventListener("pointerup", onUp);
-      resizer.removeEventListener("pointercancel", onUp);
-      if (next) updateLayout((nodes) => Layout.resize(nodes, { [a.id]: next[0], [b.id]: next[1] }));
-    }
+  // ── floating windows: moved by their tab bars, sized by their edges and
+  //    corners, and brought to the front when touched
 
-    resizer.addEventListener("pointermove", onMove);
-    resizer.addEventListener("pointerup", onUp);
-    resizer.addEventListener("pointercancel", onUp);
+  // how big the frame is, to keep floats in reach on a smaller screen than
+  // the one they were put on
+  const [frameSize, setFrameSize] = createSignal(null);
+  const frameObserver = new ResizeObserver(([entry]) =>
+    setFrameSize({ w: entry.contentRect.width, h: entry.contentRect.height }),
+  );
+
+  // where a float shows: where it is, kept in reach
+  function floatBox(float) {
+    const frame = frameSize();
+    if (!frame) return float;
+    const w = Math.min(float.w, frame.w);
+    const h = Math.min(float.h, frame.h);
+    return {
+      w,
+      h,
+      x: Math.max(FLOAT_REACH.x - w, Math.min(float.x, frame.w - FLOAT_REACH.x)),
+      y: Math.max(0, Math.min(float.y, frame.h - FLOAT_REACH.y)),
+    };
+  }
+
+  // the top node a panel, group or split is in, from the doc
+  function topOf(id) {
+    const nodes = layoutHandle.doc()?.nodes ?? {};
+    while (nodes[id]?.parent != null) id = nodes[id].parent;
+    return nodes[id] ? id : null;
+  }
+  const isFloating = (id) => !!layoutHandle.doc()?.nodes?.[topOf(id)]?.float;
+
+  function raise(node) {
+    if (layout.floats.at(-1)?.id === node.id) return;
+    const float = layoutHandle.doc()?.nodes?.[node.id]?.float;
+    if (float) updateLayout((nodes) => Layout.float(nodes, node.id, float));
+  }
+
+  // "move", or an edge or corner: "n", "se"…
+  function startFloat(event, node, edge) {
+    if (event.button !== 0 || !node.float) return;
+    event.preventDefault();
+    const from = { ...floatBox(node.float), z: node.float.z };
+    const sides = edge === "move" ? "" : edge;
+    const sx = event.clientX;
+    const sy = event.clientY;
+    // sized, it stops at the frame's edges, so its own stay in reach
+    const frame = frameSize() ?? { w: Infinity, h: Infinity };
+    const most = {
+      e: Math.max(FLOAT_MIN.w, frame.w - from.x),
+      s: Math.max(FLOAT_MIN.h, frame.h - from.y),
+      w: Math.max(FLOAT_MIN.w, from.x + from.w),
+      n: Math.max(FLOAT_MIN.h, from.y + from.h),
+    };
+    dragLive(
+      event,
+      edge,
+      (event) => {
+        const dx = event.clientX - sx;
+        const dy = event.clientY - sy;
+        let { x, y, w, h } = from;
+        if (edge === "move") {
+          x += dx;
+          y += dy;
+        }
+        const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+        if (sides.includes("e")) w = clamp(from.w + dx, FLOAT_MIN.w, most.e);
+        if (sides.includes("s")) h = clamp(from.h + dy, FLOAT_MIN.h, most.s);
+        if (sides.includes("w")) {
+          w = clamp(from.w - dx, FLOAT_MIN.w, most.w);
+          x = from.x + from.w - w;
+        }
+        if (sides.includes("n")) {
+          h = clamp(from.h - dy, FLOAT_MIN.h, most.n);
+          y = from.y + from.h - h;
+        }
+        const box = floatBox({ x, y, w, h });
+        const float = { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(w), h: Math.round(h), z: from.z };
+        return { [node.id]: { float } };
+      },
+      (nodes, fields) => Layout.float(nodes, node.id, fields[node.id].float),
+    );
+  }
+
+  // a tab, out of the tiles: over where it was, a bit smaller
+  function floatPanel(panel, groupId) {
+    const frame = root.getBoundingClientRect();
+    const section = root.querySelector(`[data-group="${CSS.escape(groupId)}"]`);
+    const rect = section?.getBoundingClientRect() ?? frame;
+    const w = Math.round(Math.min(Math.max(rect.width * 0.8, 320), frame.width));
+    const h = Math.round(Math.min(Math.max(rect.height * 0.8, 240), frame.height));
+    const x = Math.round(Math.max(0, rect.left - frame.left + (rect.width - w) / 2));
+    const y = Math.round(Math.max(0, rect.top - frame.top + (rect.height - h) / 2));
+    updateLayout((nodes) => Layout.float(nodes, panel.id, { x, y, w, h }));
+    activate(panel.id);
+  }
+
+  // a floating tab, back in the tiles: in the pane last used, if that's tiled
+  function dockPanel(panel) {
+    updateLayout((nodes) => Layout.dock(nodes, panel.id, lastGroupId));
+    activate(panel.id);
   }
 
   // ── the pieces ─────────────────────────────────────────────────────────
@@ -942,20 +1159,39 @@ export function mountLatticework(
     </div>`;
   }
 
-  // a group or split floating over the tiles
+  // a group or split floating over the tiles. its tab bars move it (where
+  // there aren't tabs), and its edges size it
   function Float(props) {
     const node = props.node;
     return html`<div
       class="latticework-float"
-      style=${() => ({
-        left: `${node.float.x}px`,
-        top: `${node.float.y}px`,
-        width: `${node.float.w}px`,
-        height: `${node.float.h}px`,
-        "z-index": 10 + node.float.z,
-      })}
+      data-float=${node.id}
+      style=${() => {
+        const box = floatBox(node.float);
+        return {
+          left: `${box.x}px`,
+          top: `${box.y}px`,
+          width: `${box.w}px`,
+          height: `${box.h}px`,
+          "z-index": 10 + node.float.z,
+        };
+      }}
+      ref=${(el) => {
+        // before anything in it (an editor, say) can keep the pointer to itself
+        el.addEventListener("pointerdown", () => raise(node), true);
+      }}
+      onPointerDown=${(event) => {
+        if (event.target.classList?.contains("knitoutjs-tabs")) startFloat(event, node, "move");
+      }}
     >
       <${Node} node=${node} />
+      ${FLOAT_EDGES.map(
+        (edge) => html`<div
+          class="latticework-float-edge"
+          data-edge=${edge}
+          onPointerDown=${(event) => startFloat(event, node, edge)}
+        ></div>`,
+      )}
     </div>`;
   }
 
@@ -1100,7 +1336,7 @@ export function mountLatticework(
       data-glow=${() => glow(panel.url)}
       data-shared=${() => (inManyPanes(panel.url) ? "" : undefined)}
       title=${() => `${info.name}\ndrag to move it, or onto a pane's edge to split it\ndouble click the name to rename`}
-      onClick=${() => setActive(group.id, panel.id)}
+      onClick=${() => showTab(group.id, panel.id)}
       onDragStart=${(event) => {
         event.dataTransfer.setData(PANEL_TYPE, panel.id);
         event.dataTransfer.effectAllowed = "move";
@@ -1135,7 +1371,7 @@ export function mountLatticework(
           title="what it's shown with: change it here, or open it with something else in a new tab"
           onClick=${(event) => {
             event.stopPropagation();
-            setActive(group.id, panel.id);
+            showTab(group.id, panel.id);
             openToolMenu(event, panel, group.id);
           }}
         >
@@ -1411,6 +1647,22 @@ export function mountLatticework(
           </button>
         </div>`}
       <//>
+      <div class="latticework-menu-rule" role="separator"></div>
+      <button
+        class="knitoutjs-menu-item"
+        role="menuitem"
+        onClick=${() => {
+          const { panel, groupId } = toolMenuFor();
+          toolMenu.hidePopover();
+          if (isFloating(panel.id)) dockPanel(panel);
+          else floatPanel(panel, groupId);
+        }}
+      >
+        ${() => {
+          const panel = toolMenuFor()?.panel;
+          return panel && isFloating(panel.id) ? "dock" : "float";
+        }}
+      </button>
     </div>`;
   }
 
@@ -1419,7 +1671,7 @@ export function mountLatticework(
   function open(url) {
     const showing = findShowing(url);
     if (showing) {
-      setActive(showing.group.id, showing.panel.id);
+      showTab(showing.group.id, showing.panel.id);
       flashDoc(url);
     } else {
       openDocs([url], null);
@@ -1645,6 +1897,7 @@ export function mountLatticework(
           ref=${(el) => {
             root = el;
             listenForDrops(el);
+            frameObserver.observe(el);
           }}
           data-resizing=${resizing}
         >
@@ -1675,6 +1928,11 @@ export function mountLatticework(
 
   return function unmount() {
     layoutHandle.off("change", readLayout);
+    layoutHandle.off("ephemeral-message", onDragMessage);
+    tabChannel.close();
+    frameObserver.disconnect();
+    clearTimeout(lapse);
+    clearTimeout(sendTimer);
     offFiles();
     document.removeEventListener("dragover", onDocumentDragOver);
     document.removeEventListener("dragend", stopDragging);

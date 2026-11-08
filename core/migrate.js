@@ -8,14 +8,19 @@ import { LAYOUT_TYPE, OLD_KNITOUTJS_TYPES, projectTitle, typeOf } from "./projec
 import * as Layout from "./layout.js";
 import { folderFiles, folderTitle } from "./folder.js";
 import { createDoc, findSoon } from "./patchwork-docs.js";
+import { seedActive } from "./active.js";
 
 const string = (value) => (value == null ? "" : String(value));
 const isUrl = (value) => isValidAutomergeUrl(string(value));
 const copy = (value) => (value && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : null);
 
+// the old tree kept which tab each group showed. that's this browser's now
+// (active.js), so whoever updates it keeps theirs
 async function newLayout(repo, tree, hive) {
-  const { nodes } = Layout.fromTree(tree);
-  return createDoc(repo, { "@patchwork": { type: LAYOUT_TYPE }, nodes }, hive);
+  const { nodes, active } = Layout.fromTree(tree);
+  const handle = await createDoc(repo, { "@patchwork": { type: LAYOUT_TYPE }, nodes }, hive);
+  seedActive(handle.url, active);
+  return handle;
 }
 
 export const isOldKnitoutjs = (doc) => OLD_KNITOUTJS_TYPES.includes(typeOf(doc));

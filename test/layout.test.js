@@ -18,6 +18,7 @@ import {
   setTool,
   resize,
   float,
+  dock,
   findPanelShowing,
 } from "../core/layout.js";
 
@@ -274,6 +275,40 @@ test("floating, and docking again", () => {
   assert(!nodes[floating].float);
   moveNode(nodes, groupWith(nodes, "c"), groupWith(nodes, "a"), "center");
   assert.equal(shapeOf(nodes), "row(b | a c)");
+  assertTree(nodes);
+});
+
+test("docking a floating tab", () => {
+  const nodes = {};
+  openPanels(nodes, null, "center", [{ url: "a", tool: "editor" }]);
+  openPanels(nodes, groupWith(nodes, "a"), "right", [{ url: "b", tool: "editor" }]);
+  const b = findPanelShowing(nodes, "b");
+  float(nodes, b, { x: 0, y: 0, w: 100, h: 100 });
+  openPanels(nodes, groupWith(nodes, "b"), "center", [{ url: "c", tool: "editor" }]);
+  assert.equal(shapeOf(nodes), "a, float b c");
+  // into the group asked for, or the first tiled one
+  dock(nodes, b, groupWith(nodes, "a"));
+  assert.equal(shapeOf(nodes), "a b, float c");
+  const c = findPanelShowing(nodes, "c");
+  dock(nodes, c, "nowhere");
+  assert.equal(shapeOf(nodes), "a b c");
+  // a tiled tab stays where it is
+  const before = clone(nodes);
+  dock(nodes, b, groupWith(nodes, "a"));
+  assert.deepEqual(touched(before, nodes), []);
+  // with nothing tiled, a float's only tab takes its group down with it
+  const floating = float(nodes, groupWith(nodes, "a"), { x: 0, y: 0, w: 100, h: 100 });
+  assert.equal(shapeOf(nodes), ", float a b c");
+  movePanel(nodes, c, floating, "right");
+  dock(nodes, c);
+  assert.equal(shapeOf(nodes), "c, float a b");
+  remove(nodes, c);
+  const lone = float(nodes, b, { x: 0, y: 0, w: 100, h: 100 });
+  remove(nodes, findPanelShowing(nodes, "a"));
+  assert.equal(shapeOf(nodes), ", float b");
+  dock(nodes, b);
+  assert.equal(shapeOf(nodes), "b");
+  assert.equal(nodes[b].parent, lone);
   assertTree(nodes);
 });
 

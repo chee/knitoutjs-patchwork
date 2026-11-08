@@ -79,6 +79,26 @@
 		&[data-resizing="column"] {
 			cursor: row-resize;
 		}
+		/* a floating window, moved or sized by an edge or corner */
+		&[data-resizing="move"] {
+			cursor: grabbing;
+		}
+		&[data-resizing="n"],
+		&[data-resizing="s"] {
+			cursor: ns-resize;
+		}
+		&[data-resizing="e"],
+		&[data-resizing="w"] {
+			cursor: ew-resize;
+		}
+		&[data-resizing="ne"],
+		&[data-resizing="sw"] {
+			cursor: nesw-resize;
+		}
+		&[data-resizing="nw"],
+		&[data-resizing="se"] {
+			cursor: nwse-resize;
+		}
 		/* canvases and editors would grab the pointer mid-drag */
 		&[data-resizing] {
 			user-select: none;
@@ -982,6 +1002,55 @@
 		background: var(--knitoutjs-paper);
 		box-shadow: 0 4px 18px 2px #33001833;
 		overflow: hidden;
+
+		/* held where there aren't tabs, the tab bar moves it */
+		& .knitoutjs-tabs {
+			cursor: grab;
+		}
+	}
+
+	/* its edges and corners size it. inside it, since it clips */
+	& .latticework-float-edge {
+		position: absolute;
+		z-index: 3;
+		touch-action: none;
+
+		&[data-edge="n"],
+		&[data-edge="s"] {
+			left: 10px;
+			right: 10px;
+			height: 5px;
+			cursor: ns-resize;
+		}
+		&[data-edge="e"],
+		&[data-edge="w"] {
+			top: 10px;
+			bottom: 10px;
+			width: 5px;
+			cursor: ew-resize;
+		}
+		&[data-edge="n"] { top: 0; }
+		&[data-edge="s"] { bottom: 0; }
+		&[data-edge="e"] { right: 0; }
+		&[data-edge="w"] { left: 0; }
+
+		&[data-edge="ne"],
+		&[data-edge="se"],
+		&[data-edge="sw"],
+		&[data-edge="nw"] {
+			width: 10px;
+			height: 10px;
+		}
+		&[data-edge="ne"] { top: 0; right: 0; cursor: nesw-resize; }
+		&[data-edge="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
+		&[data-edge="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+		&[data-edge="se"] { bottom: 0; right: 0; cursor: nwse-resize; }
+	}
+
+	& .latticework-menu-rule {
+		height: 1px;
+		margin: 4px 0;
+		background: var(--knitoutjs-line-soft);
 	}
 }
 
