@@ -1,11 +1,11 @@
-// a project, shown: latticework on its layout and files. one from before
+// a project, shown: latticework on its nodes and files. one from before
 // shows only a button to update it
 import { createSignal, Show } from "solid-js";
 import { render } from "solid-js/web";
 import html from "solid-js/html";
 import { isValidAutomergeUrl } from "@automerge/automerge-repo/slim";
 import { mountLatticework } from "./latticework.js";
-import { LAYOUT_TYPE, PROJECT_TYPES, projectTitle, typeOf } from "./project.js";
+import { PROJECT_TYPES, projectTitle, typeOf } from "./project.js";
 import { isOldKnitoutjs, updateKnitoutjs } from "./migrate.js";
 import { folderFiles } from "./folder.js";
 import { directoryFiles } from "./directory.js";
@@ -17,7 +17,7 @@ const string = (value) => (value == null ? "" : String(value));
 const isUrl = (value) => isValidAutomergeUrl(string(value));
 
 export function isProject(doc) {
-  return PROJECT_TYPES.includes(typeOf(doc)) && isUrl(doc.layout) && isUrl(doc.files);
+  return PROJECT_TYPES.includes(typeOf(doc)) && isUrl(doc.files);
 }
 
 /**
@@ -26,8 +26,7 @@ export function isProject(doc) {
  */
 export async function createProject(repo, { type, title = "untitled", files, hive }) {
   files ??= (await createDoc(repo, { "@patchwork": { type: "folder" }, title, docs: [] }, hive)).url;
-  const layout = await createDoc(repo, { "@patchwork": { type: LAYOUT_TYPE }, nodes: {} }, hive);
-  return createDoc(repo, { "@patchwork": { type }, title, files, layout: layout.url }, hive);
+  return createDoc(repo, { "@patchwork": { type }, title, files, nodes: {} }, hive);
 }
 
 // a project's files, read and changed through the folder or directory
@@ -117,7 +116,7 @@ function mountProblem(element, text) {
 }
 
 /**
- * a project in `element`: latticework on its layout and files, or, for one
+ * a project in `element`: latticework on its nodes and files, or, for one
  * from before, a button to update it. it follows the project doc, so when
  * the update's done (here or anywhere) the panes show. returns a way to
  * unmount.
@@ -133,9 +132,8 @@ export function mountProject(element, { project, repo, baseRepo = repo, hive, ..
   let shown = null;
   let dead = false;
 
-  // what's showing depends on the doc's type and its layout and files
-  const keyOf = (doc) =>
-    isOldKnitoutjs(doc) ? "old" : isProject(doc) ? `${doc.layout} ${doc.files}` : "none";
+  // what's showing depends on the doc's type and its files
+  const keyOf = (doc) => (isOldKnitoutjs(doc) ? "old" : isProject(doc) ? string(doc.files) : "none");
 
   function show() {
     const doc = project.doc();
@@ -167,12 +165,15 @@ export function mountProject(element, { project, repo, baseRepo = repo, hive, ..
       now.dead = true;
       off?.();
     };
-    Promise.all([repo.find(string(doc.layout)), repo.find(string(doc.files))]).then(
-      ([layout, files]) => {
+    // the files, and the same doc under any draft: who's in the project is
+    // heard over that, so everyone's in one room, on whichever draft
+    Promise.all([repo.find(string(doc.files)), baseRepo.find(string(doc.files))]).then(
+      ([files, room]) => {
         if (now.dead || dead) return;
         off = mountLatticework(box, {
-          layout,
+          layout: project,
           files: titledFiles(filesOf(files, repo), project),
+          room,
           repo,
           baseRepo,
           hive,
@@ -181,8 +182,8 @@ export function mountProject(element, { project, repo, baseRepo = repo, hive, ..
       },
       (error) => {
         if (now.dead || dead) return;
-        console.error("[latticework] couldn't find the project's layout or files", error);
-        off = mountProblem(box, "couldn't find its layout or its files");
+        console.error("[latticework] couldn't find the project's files", error);
+        off = mountProblem(box, "couldn't find its files");
       },
     );
   }

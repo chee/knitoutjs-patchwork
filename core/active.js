@@ -1,5 +1,5 @@
 // which tab each group shows. it's this browser's, not the doc's: kept in
-// localStorage by layout doc and group, so a reload finds it, and passed
+// localStorage by project and group, so a reload finds it, and passed
 // round a BroadcastChannel, so this browser's other tabs follow along.
 // switching tabs writes nothing to the doc
 const key = (layoutUrl) => `latticework:active:${layoutUrl}`;

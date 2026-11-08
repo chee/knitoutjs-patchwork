@@ -4,7 +4,7 @@
 // draft's copy of it. and the drafts go: they're forks of the old shape, and
 // merging one back would bring the old shape back with it
 import { isValidAutomergeUrl } from "@automerge/automerge-repo/slim";
-import { LAYOUT_TYPE, OLD_KNITOUTJS_TYPES, projectTitle, typeOf } from "./project.js";
+import { OLD_KNITOUTJS_TYPES, projectTitle, typeOf } from "./project.js";
 import * as Layout from "./layout.js";
 import { folderFiles, folderTitle } from "./folder.js";
 import { createDoc, findSoon } from "./patchwork-docs.js";
@@ -14,40 +14,33 @@ const string = (value) => (value == null ? "" : String(value));
 const isUrl = (value) => isValidAutomergeUrl(string(value));
 const copy = (value) => (value && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : null);
 
-// the old tree kept which tab each group showed. that's this browser's now
-// (active.js), so whoever updates it keeps theirs
-async function newLayout(repo, tree, hive) {
-  const { nodes, active } = Layout.fromTree(tree);
-  const handle = await createDoc(repo, { "@patchwork": { type: LAYOUT_TYPE }, nodes }, hive);
-  seedActive(handle.url, active);
-  return handle;
-}
-
 export const isOldKnitoutjs = (doc) => OLD_KNITOUTJS_TYPES.includes(typeOf(doc));
 
 /**
- * what a project links to, made from the shape before projects: a folder of
- * `urls` and a layout doc of `tree`. returns their urls, {files, layout}
+ * what a project has, made from the shape before projects: a folder of
+ * `urls`, and the nodes of `tree`. returns {files: the folder's url, nodes,
+ * active}. `active` is which tab each group of the tree showed: hand it to
+ * seedActive with the project's url, so whoever updated it keeps theirs
  */
 export async function partsFrom({ title, urls = [], tree = null }, repo, hive) {
   const folder = await createDoc(repo, { "@patchwork": { type: "folder" }, title, docs: [] }, hive);
   await folderFiles(folder, repo).add(urls.map(string).filter(isUrl));
-  const layout = await newLayout(repo, copy(tree), hive);
-  return { files: folder.url, layout: layout.url };
+  return { files: folder.url, ...Layout.fromTree(copy(tree)) };
 }
 
 /**
  * a knitoutjs project from before becomes a knitoutjs-project, in place: its
- * files go in a new folder, its tree in a new layout doc. `handle` is the
- * doc's own, from `repo`. says whether it was this that did it (someone else
- * may have, meanwhile)
+ * files go in a new folder, its tree becomes its nodes. `handle` is the doc's
+ * own, from `repo`. says whether it was this that did it (someone else may
+ * have, meanwhile)
  */
 export async function updateKnitoutjs(handle, repo, hive) {
   const doc = handle.doc();
   const from = typeOf(doc);
   if (!OLD_KNITOUTJS_TYPES.includes(from)) return false;
-  const parts = await partsFrom(
-    { title: projectTitle(doc), urls: Array.isArray(doc.files) ? doc.files : [], tree: doc.layout },
+  const title = projectTitle(doc);
+  const { files, nodes, active } = await partsFrom(
+    { title, urls: Array.isArray(doc.files) ? doc.files : [], tree: doc.layout },
     repo,
     hive,
   );
@@ -56,10 +49,13 @@ export async function updateKnitoutjs(handle, repo, hive) {
     if (typeOf(doc) !== from) return;
     doc["@patchwork"].type = "knitoutjs-project";
     delete doc["@patchwork"].mainDraftUrl;
-    doc.files = parts.files;
-    doc.layout = parts.layout;
+    doc.title = title;
+    doc.files = files;
+    delete doc.layout;
+    doc.nodes = nodes;
     done = true;
   });
+  if (done) seedActive(handle.url, active);
   return done;
 }
 
@@ -108,28 +104,33 @@ export async function updateLatticeFolder(folder, repo, { title, hive } = {}) {
   const doc = folder.doc();
   title ??= folderTitle(doc);
   if (!isUrl(doc.workspace)) {
-    const layout = await newLayout(repo, copy(doc.layout), hive);
+    const { nodes, active } = Layout.fromTree(copy(doc.layout));
     const project = await createDoc(
       repo,
-      { "@patchwork": { type: "lattice:project" }, title, files: folder.url, layout: layout.url },
+      { "@patchwork": { type: "lattice:project" }, title, files: folder.url, nodes },
       hive,
     );
+    seedActive(project.url, active);
     finish(folder, project.url);
     return project.url;
   }
   const project = await repo.find(string(doc.workspace));
-  const layout = await newLayout(repo, copy(project.doc()?.layout), hive);
+  const { nodes, active } = Layout.fromTree(copy(project.doc()?.layout));
+  let done = false;
   project.change((doc) => {
     if (typeOf(doc) !== "lattice:workspace") return;
     doc["@patchwork"].type = "lattice:project";
     delete doc["@patchwork"].mainDraftUrl;
     doc.title = title;
     doc.files = folder.url;
-    doc.layout = layout.url;
+    delete doc.layout;
+    doc.nodes = nodes;
+    done = true;
   });
   if (typeOf(project.doc()) !== "lattice:project") {
     throw new Error(`its workspace is a ${typeOf(project.doc()) || "doc with no type"}`);
   }
+  if (done) seedActive(project.url, active);
   finish(folder, project.url);
   return project.url;
 }

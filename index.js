@@ -28,19 +28,6 @@ export const plugins = [
       return OldKnitoutJSDatatype;
     },
   },
-  // a project's layout: its panes, and what's in them. it lives behind a
-  // project (as `layout`), never on its own
-  {
-    type: "patchwork:datatype",
-    id: "latticework:layout",
-    name: "Layout",
-    icon: "LayoutGrid",
-    unlisted: true,
-    async load() {
-      const { layoutDatatype } = await import("./core/project.js");
-      return layoutDatatype;
-    },
-  },
   {
     type: "patchwork:tool",
     id: "knitoutjs-project",

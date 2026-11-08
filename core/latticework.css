@@ -73,6 +73,16 @@
 			box-sizing: border-box;
 		}
 
+		/* someone else's panes, followed: their colour round them */
+		&[data-following]::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			z-index: 20;
+			border: 2px solid var(--following-colour, var(--knitoutjs-ink));
+			pointer-events: none;
+		}
+
 		&[data-resizing="row"] {
 			cursor: col-resize;
 		}
@@ -1145,6 +1155,33 @@
 		&:hover {
 			background: var(--studio-chrome-fill-offset-20, #0001);
 			color: inherit;
+		}
+	}
+
+	/* who else is here, by the project's name. one's pressed while it's
+	   being followed */
+	& .latticework-faces {
+		display: flex;
+		flex: none;
+		gap: 2px;
+	}
+
+	& .latticework-face {
+		display: grid;
+		place-items: center;
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: 2px solid var(--face-colour, var(--lattice-muted));
+		border-radius: 50%;
+		background: var(--studio-chrome-fill-offset-20, #0001) center / cover;
+		color: inherit;
+		font: 600 9px/1 var(--knitoutjs-sans, system-ui, sans-serif);
+		cursor: pointer;
+
+		&[aria-pressed="true"] {
+			outline: 2px solid var(--face-colour, var(--lattice-muted));
+			outline-offset: 1px;
 		}
 	}
 

@@ -1,5 +1,4 @@
-// a layout, kept in a latticework:layout doc as flat nodes, each pointing at
-// its parent:
+// a layout, kept on a project as flat nodes, each pointing at its parent:
 //
 //   nodes: {
 //     [id]: {

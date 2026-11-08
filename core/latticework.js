@@ -19,6 +19,7 @@ import { Resizer, sidebarState } from "./sidebars.js";
 import { icon } from "./icons.js";
 import { builds, setBuild } from "./builds.js";
 import { readActive, writeActive, activeChannel } from "./active.js";
+import { joinRoom, faceImage } from "./presence.js";
 
 const STYLESHEET = new URL("./latticework.css", import.meta.url).href;
 
@@ -149,8 +150,12 @@ function cellStyle(node, direction) {
 /**
  * a project's panes, and its files down the side. returns a way to unmount.
  *
- *   layout     the handle of its layout doc ({nodes}: see layout.js)
+ *   layout     the handle of the doc its layout's on, as `nodes` (see
+ *              layout.js): the project
  *   files      its files: an adapter, like folder.js's folderFiles
+ *   room       the handle of its files' folder or directory, from the repo
+ *              under any draft overlay: who else is in the project is
+ *              heard over it (presence.js). without one, nobody is
  *   repo       finds and makes docs. through a draft overlay, if there is
  *              one, so what's done here goes into whichever draft is out
  *   baseRepo   for tools that mustn't be forked into a draft (a terminal:
@@ -175,6 +180,7 @@ export function mountLatticework(
   {
     layout: layoutHandle,
     files,
+    room: roomHandle,
     repo,
     baseRepo = repo,
     hive,
@@ -207,6 +213,15 @@ export function mountLatticework(
   const live = new Map();
   let lapse = null;
 
+  // who else is in the project (presence.js): a face each, and their panes.
+  // following one, their panes show here instead (read only) until you stop:
+  // `following` is their peer id
+  let room = null;
+  const [people, setPeople] = createStore([]);
+  const theirs = new Map();
+  const [following, setFollowing] = createSignal(null);
+  const [theirActive, setTheirActive] = createStore({});
+
   function readLayout() {
     const nodes = layoutHandle.doc()?.nodes ?? {};
     const shown = { ...nodes };
@@ -224,19 +239,67 @@ export function mountLatticework(
     }
     clearTimeout(lapse);
     if (soonest < Infinity) lapse = setTimeout(readLayout, soonest - now + 10);
-    setLayout(reconcile(Layout.read(shown), { key: "id" }));
+    shareLayout(shown);
+    const leader = following() && theirs.get(following());
+    if (following() && !leader) setFollowing(null);
+    if (leader) setTheirActive(reconcile(leader.active));
+    setLayout(reconcile(Layout.read(leader ? leader.nodes : shown), { key: "id" }));
   }
   function readFiles() {
     setFileUrls(files.urls());
     setProjectName(files.title());
   }
+
+  // ours goes to the room as it changes, drags and all, for anyone
+  // following: at most every LIVE_EVERY, and not when it's the same
+  let sharedNodes = "";
+  let toShare = null;
+  let shareTimer = null;
+  function shareLayout(nodes) {
+    if (!room) return;
+    toShare = nodes;
+    shareTimer ??= setTimeout(() => {
+      shareTimer = null;
+      const json = JSON.stringify(toShare);
+      if (json === sharedNodes) return;
+      sharedNodes = json;
+      room.share("nodes", JSON.parse(json));
+    }, LIVE_EVERY);
+  }
+
+  if (roomHandle) {
+    room = joinRoom(roomHandle, baseRepo, (list) => {
+      theirs.clear();
+      for (const person of list) theirs.set(person.peer, person);
+      setPeople(
+        reconcile(
+          list.map(({ peer, name, colour, avatar }) => ({ peer, name, colour, avatar })),
+          { key: "peer" },
+        ),
+      );
+      if (following()) readLayout();
+    });
+  }
+
+  // someone's panes instead of yours, or yours again (`peer` again, or none)
+  function follow(peer) {
+    setFollowing(peer && following() !== peer ? peer : null);
+    readLayout();
+  }
+  const onEscape = (event) => {
+    if (event.key === "Escape" && following()) follow(null);
+  };
+  document.addEventListener("keydown", onEscape);
+
   readLayout();
   readFiles();
   layoutHandle.on("change", readLayout);
   const offFiles = files.subscribe(readFiles);
 
-  // an edit from layout.js, on the doc's nodes. returns what the edit does
+  // an edit from layout.js, on the doc's nodes. returns what the edit does.
+  // following someone, there's nothing to edit: their panes are theirs
   function updateLayout(edit) {
+    if (following()) return [];
     let result;
     layoutHandle.change((doc) => {
       doc.nodes ??= {};
@@ -260,12 +323,19 @@ export function mountLatticework(
   // which tab each group is showing. it's this browser's, not the doc's
   // (active.js): remembered for next time, and this browser's other tabs
   // follow along
+  // (following someone, it's theirs that shows, from the room)
   const [active, setActive] = createStore(readActive(layoutHandle.url));
-  const activeIn = (group) => group.panels.find((panel) => panel.id === active[group.id]) ?? group.panels[0];
-  const tabChannel = activeChannel(layoutHandle.url, (groupId, panelId) => setActive(groupId, panelId));
+  const activeIn = (group) =>
+    group.panels.find((panel) => panel.id === (following() ? theirActive : active)[group.id]) ??
+    group.panels[0];
+  const tabChannel = activeChannel(layoutHandle.url, (groupId, panelId) => {
+    setActive(groupId, panelId);
+    room?.share("active", { ...active });
+  });
+  room?.share("active", { ...active });
 
   function showTab(groupId, panelId) {
-    if (!groupId || !panelId || active[groupId] === panelId) return;
+    if (following() || !groupId || !panelId || active[groupId] === panelId) return;
     setActive(groupId, panelId);
     tabChannel.post(groupId, panelId);
     // only what still points at a tab in its group
@@ -273,6 +343,7 @@ export function mountLatticework(
     const kept = {};
     for (const [group, panel] of Object.entries(active)) if (nodes[panel]?.parent === group) kept[group] = panel;
     writeActive(layoutHandle.url, kept);
+    room?.share("active", kept);
   }
   function activate(panelId) {
     showTab(layoutHandle.doc()?.nodes?.[panelId]?.parent, panelId);
@@ -907,7 +978,7 @@ export function mountLatticework(
   }
 
   // ── live drags: a divider or a floating window, shown as it goes, here
-  //    and to everyone else looking (over the layout doc's broadcast), and
+  //    and to everyone else looking (over the project's broadcast), and
   //    written to the doc once, when it's let go of
 
   // what's being dragged here: a divider's direction, "move", or the edge a
@@ -948,6 +1019,7 @@ export function mountLatticework(
   // now ({[id]: {size} or {float}}), and write(nodes, fields) puts that in
   // the doc when it's let go of
   function dragLive(event, cursor, fieldsAt, write) {
+    if (following()) return;
     const target = event.currentTarget;
     target.setPointerCapture(event.pointerId);
     setResizing(cursor);
@@ -1667,8 +1739,10 @@ export function mountLatticework(
   }
 
   // a file from the list: brought forward if it's showing, else opened in
-  // the pane last used
+  // the pane last used. following someone, it stops, and it's yours it opens
+  // in
   function open(url) {
+    if (following()) follow(null);
     const showing = findShowing(url);
     if (showing) {
       showTab(showing.group.id, showing.panel.id);
@@ -1783,6 +1857,7 @@ export function mountLatticework(
       <div class="lattice-sidebar-content">
         <header class="lattice-files-heading">
           <span class="lattice-path" title=${() => projectName()}>${projectName}</span>
+          <${Faces} />
           <button
             class="lattice-icon-button"
             title="a new file, or open one (hold alt for more)"
@@ -1852,6 +1927,36 @@ export function mountLatticework(
     </nav>`;
   }
 
+  // who else is here: a face each. clicking one follows them, clicking it
+  // again (or escape) stops
+  function Faces() {
+    return html`<${Show} when=${() => people.length}>
+      <span class="latticework-faces" role="group" aria-label="who's here">
+        <${For} each=${() => people}>
+          ${(person) => {
+            const image = () => faceImage(person.avatar);
+            return html`<button
+              class="latticework-face"
+              style=${() => ({
+                "--face-colour": person.colour || null,
+                "background-image": image() ? `url("${image()}")` : null,
+              })}
+              aria-pressed=${() => String(following() === person.peer)}
+              aria-label=${() => (following() === person.peer ? `stop following ${person.name}` : `follow ${person.name}`)}
+              title=${() => (following() === person.peer ? `stop following ${person.name}` : `follow ${person.name}`)}
+              onClick=${() => follow(person.peer)}
+            >
+              ${() => (image() ? "" : (person.name[0] ?? "?").toUpperCase())}
+            </button>`;
+          }}
+        <//>
+      </span>
+    <//>`;
+  }
+
+  // the colour round the panes while they're someone else's
+  const followingColour = () => people.find((person) => person.peer === following())?.colour || null;
+
   // the files, shut, when nothing else opens them: a strip to open them
   function FilesShut() {
     return html`<button
@@ -1900,6 +2005,9 @@ export function mountLatticework(
             frameObserver.observe(el);
           }}
           data-resizing=${resizing}
+          data-following=${() => (following() ? "" : undefined)}
+          inert=${() => !!following()}
+          style=${() => ({ "--following-colour": followingColour() })}
         >
           <svg class="knitoutjs-defs" aria-hidden="true">
             <filter id="knitoutjs-rough-1">
@@ -1929,6 +2037,9 @@ export function mountLatticework(
   return function unmount() {
     layoutHandle.off("change", readLayout);
     layoutHandle.off("ephemeral-message", onDragMessage);
+    room?.stop();
+    clearTimeout(shareTimer);
+    document.removeEventListener("keydown", onEscape);
     tabChannel.close();
     frameObserver.disconnect();
     clearTimeout(lapse);
