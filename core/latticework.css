@@ -1242,3 +1242,20 @@
 	33% { filter: url(#knitoutjs-rough-2); }
 	66% { filter: url(#knitoutjs-rough-3); }
 }
+
+/* ── a project from before: only a button to update it ───────────────────── */
+
+.knitoutjs-editor-tool.latticework-update {
+	display: flex;
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	background: var(--knitoutjs-paper);
+	font: 14px/1.4 var(--knitoutjs-sans);
+
+	& .latticework-update-heading {
+		margin: 0 0 8px;
+		color: var(--knitoutjs-ink);
+		font: 400 24px/1.1 var(--knitoutjs-serif);
+	}
+}

@@ -1,58 +1,55 @@
-import defaultJavaScriptContent from "./core/default-source.js";
-import { newFileDoc } from "./files.js";
-import { newPanel, newGroup, newSplit } from "./core/layout-tree.js";
+// nothing imported up here: patchwork may read this list in a worker, which
+// has no import map, so a bare import anywhere below this file stops the
+// whole package registering. what each plugin needs, its load() imports
 
-export const KnitoutJSDatatype = {
-  // patchwork calls this inside handle.change without waiting for it, so
-  // everything written to `doc` has to happen before the first await
-  init(doc, repo) {
-    doc.title = "Knitout!";
-
-    const k = repo.create(newFileDoc("pattern.k"));
-    const js = repo.create({
-      ...newFileDoc("pattern.knitout.js", defaultJavaScriptContent),
-      knitoutTarget: k.url,
-    });
-
-    doc.files = [js.url, k.url];
-    doc.layout = newSplit("row", [
-      newGroup([newPanel(js.url, "editor")]),
-      newGroup([newPanel(k.url, "editor")]),
-      newGroup([newPanel(k.url, "visualizer")]),
-    ]);
-
-    // fill the .k, so the visualizer has stitches the first time you look
-    import("./core/run.js").then(({ runInto }) => runInto(js, k, repo));
-  },
-
-  getTitle(doc) {
-    return doc.title || "Knitout JS";
-  },
-
-  setTitle(doc, title) {
-    doc.title = title;
-  },
-};
+// knitoutjs's projects from before. the tool shows only a button to update
+// one to a knitoutjs-project
+const OLD_TYPES = ["prototype-knitoutjs-panes", "knitoutjs-panes"];
 
 export const plugins = [
   {
     type: "patchwork:datatype",
-    id: "prototype-knitoutjs-panes",
-    name: "Prototype KnitoutJS Editor",
+    id: "knitoutjs-project",
+    name: "Knitout JS",
     icon: "Shirt",
     async load() {
+      const { KnitoutJSDatatype } = await import("./datatype.js");
       return KnitoutJSDatatype;
     },
   },
   {
-    type: "patchwork:tool",
+    type: "patchwork:datatype",
     id: "prototype-knitoutjs-panes",
-    name: "Prototype Knitout JS Editor",
+    name: "Knitout JS (from before)",
     icon: "Shirt",
-    supportedDatatypes: ["prototype-knitoutjs-panes"],
+    unlisted: true,
     async load() {
-      const { default: KnitoutFrameTool } = await import("./frame.js");
-      return KnitoutFrameTool;
+      const { OldKnitoutJSDatatype } = await import("./datatype.js");
+      return OldKnitoutJSDatatype;
+    },
+  },
+  // a project's layout: its panes, and what's in them. it lives behind a
+  // project (as `layout`), never on its own
+  {
+    type: "patchwork:datatype",
+    id: "latticework:layout",
+    name: "Layout",
+    icon: "LayoutGrid",
+    unlisted: true,
+    async load() {
+      const { layoutDatatype } = await import("./core/project.js");
+      return layoutDatatype;
+    },
+  },
+  {
+    type: "patchwork:tool",
+    id: "knitoutjs-project",
+    name: "Knitout JS",
+    icon: "Shirt",
+    supportedDatatypes: ["knitoutjs-project", "lattice:project", ...OLD_TYPES],
+    async load() {
+      const { default: KnitoutProjectTool } = await import("./tool.js");
+      return KnitoutProjectTool;
     },
   },
   {

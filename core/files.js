@@ -49,7 +49,7 @@ export function fileExtension(doc) {
 }
 
 // each doc gets a colour of its own, so every pane showing it wears the same
-// one. the colours are tokens in frame.css
+// one. the colours are tokens in latticework.css
 export const DOC_COLOURS = [
   "cherry",
   "blue",

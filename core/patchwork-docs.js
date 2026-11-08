@@ -39,3 +39,33 @@ export async function createDocOfDatatype(datatype, repo, change, hive) {
   });
   return handle;
 }
+
+// a doc, or undefined if it can't be found in a while
+export async function findSoon(repo, url, ms = 15000) {
+  let timer;
+  try {
+    const later = new Promise((_, reject) => (timer = setTimeout(reject, ms)));
+    return (await Promise.race([repo.find(url), later])).doc() ?? undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// a new doc, with the sync server's relay if it's a keyhive one (as
+// createDocOfDatatype2 does)
+export async function createDoc(repo, value, hive) {
+  const handle = await repo.create2(value);
+  if (hive && isKeyhiveDoc(handle.url)) await hive.addSyncServerRelayToDoc(handle.url);
+  return handle;
+}
+
+// what a folder or a directory calls a doc it links to, and its type
+export async function describeDoc(url, repo) {
+  const doc = await findSoon(repo, url);
+  const type = doc?.["@patchwork"]?.type;
+  const datatype = await loadDatatype(type == null ? undefined : String(type));
+  const name = doc?.name ?? doc?.title ?? datatype?.module.getTitle?.(doc);
+  return { name: name == null ? "" : String(name), type: type == null ? "file" : String(type) };
+}

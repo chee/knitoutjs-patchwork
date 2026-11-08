@@ -3,7 +3,7 @@
 // in one
 import { isValidAutomergeUrl } from "@automerge/automerge-repo/slim";
 import { shortUrl } from "./files.js";
-import { loadDatatype } from "./patchwork-docs.js";
+import { describeDoc } from "./patchwork-docs.js";
 
 // a string in a doc can be a plain string or an ImmutableString (pushwork
 // writes links that way); read them the same
@@ -51,9 +51,8 @@ export function folderFiles(handle, repo) {
         urls
           .filter((url) => !have.includes(url))
           .map(async (url) => {
-            const doc = (await repo.find(url)).doc();
-            const datatype = await loadDatatype(doc?.["@patchwork"]?.type);
-            return folderLink(url, doc, datatype?.module.getTitle?.(doc));
+            const { name, type } = await describeDoc(url, repo);
+            return { name: name || shortUrl(url), type, url };
           }),
       );
       if (!links.length) return;
