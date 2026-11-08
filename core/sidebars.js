@@ -44,11 +44,14 @@ export function sidebarState(name, width) {
 }
 
 /**
- * the handle along a sidebar's right edge: drag it to resize the sidebar,
- * or most of the way shut to close it; double click for its usual width
+ * the handle along a sidebar's inner edge: drag it to resize the sidebar,
+ * or most of the way shut to close it; double click for its usual width.
+ * `side` is the edge it's on: "right" (a sidebar down the left, the usual)
+ * or "left" (one down the right)
  */
 export function Resizer(props) {
   const sidebar = props.sidebar;
+  const side = props.side === "left" ? "left" : "right";
   function onPointerDown(event) {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -58,7 +61,8 @@ export function Resizer(props) {
     const startWidth = sidebar.width();
     handle.dataset.dragging = "";
     function onMove(event) {
-      const wanted = startWidth + event.clientX - startX;
+      const moved = event.clientX - startX;
+      const wanted = startWidth + (side === "left" ? -moved : moved);
       if (wanted < CLOSE_BELOW) {
         finish();
         // it comes back as wide as it was before this drag
@@ -80,6 +84,7 @@ export function Resizer(props) {
   }
   return html`<div
     class="lattice-resizer"
+    data-side=${side}
     role="separator"
     aria-orientation="vertical"
     title="drag to resize, or to close · double click for the usual width"

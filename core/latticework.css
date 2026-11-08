@@ -983,7 +983,10 @@
 		color: var(--knitoutjs-muted);
 	}
 
+	/* (border-box here too: a menu can be outside a frame, where that isn't
+	   everything's) */
 	& .knitoutjs-menu-url input {
+		box-sizing: border-box;
 		width: 100%;
 		margin: 6px 0 2px;
 		padding: 4px 6px;
@@ -1250,19 +1253,36 @@
 		}
 	}
 
+	/* the name has the room first */
 	& .lattice-file-name {
+		flex: 0 1 auto;
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 
-	/* how long since it was last built or changed */
+	/* how long since it was last built or changed: in what room the name
+	   leaves, all of it or none (it's in the tooltip). what doesn't fit beside
+	   the empty ::before wraps onto a line that's out of sight */
 	& .lattice-file-when {
-		flex: none;
-		margin-left: 6px;
+		display: flex;
+		flex: 1 1 0;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		min-width: 0;
+		height: 1.4em;
+		overflow: hidden;
 		color: var(--lattice-muted);
 		font-family: var(--studio-family-ui, system-ui, sans-serif);
 		font-size: 10.5px;
+		line-height: 1.4em;
 		white-space: nowrap;
+
+		/* a line high, so the line after it is out of sight */
+		&::before {
+			content: "";
+			height: 1.4em;
+		}
 	}
 
 	/* the tree's dotted lines, down through the middle of the swatches: --at
@@ -1296,23 +1316,26 @@
 		top: calc(50% + 5px);
 	}
 
-	/* shown on hover, or while it's asking to be pressed again */
+	/* shown on hover, or while it's asking to be pressed again: over the end
+	   of the row, so it takes no room from the name when it's not there */
 	& .lattice-file-remove {
+		position: absolute;
+		top: 50%;
+		right: 6px;
 		display: inline-grid;
-		flex: none;
 		place-items: center;
 		visibility: hidden;
-		margin-right: 6px;
 		padding: 0 5px;
 		border: none;
 		border-radius: var(--studio-radius-sm, 4px);
-		background: none;
+		background: var(--studio-fill, #fafafa);
 		color: var(--studio-line-offset-30, currentColor);
 		font-family: var(--studio-family-ui, system-ui, sans-serif);
+		translate: 0 -50%;
 		cursor: pointer;
 
 		&:hover {
-			background: var(--studio-fill-offset-20, #0001);
+			background: color-mix(in oklab, var(--studio-fill, #fafafa), var(--studio-line, #000) 8%);
 			color: var(--studio-danger-text, #e45649);
 		}
 	}
@@ -1340,6 +1363,12 @@
 		&[data-dragging] {
 			background: color-mix(in oklch, var(--studio-primary, #007aff) 45%, transparent);
 		}
+
+		/* a sidebar down the right: its left edge */
+		&[data-side="left"] {
+			right: auto;
+			left: -3px;
+		}
 	}
 }
 
@@ -1364,4 +1393,24 @@
 		color: var(--knitoutjs-ink);
 		font: 400 24px/1.1 var(--knitoutjs-serif);
 	}
+}
+
+/* a tooltip (tooltip.js): what something's title says, by it. in the top
+   layer, so it's over menus too */
+.knitoutjs-tooltip[popover] {
+	position: fixed;
+	inset: auto;
+	width: max-content;
+	max-width: 280px;
+	margin: 0;
+	padding: 4px 7px;
+	border: 1px solid var(--studio-chrome-line, #1c1a17);
+	border-radius: 3px;
+	background: var(--studio-chrome-fill, #fffdf8);
+	box-shadow: 2px 2px 0 var(--studio-chrome-line, #1c1a17);
+	color: var(--studio-chrome-line, #1c1a17);
+	font: 11.5px/1.35 var(--studio-family-ui, system-ui, sans-serif);
+	white-space: pre-line;
+	overflow-wrap: anywhere;
+	pointer-events: none;
 }

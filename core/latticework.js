@@ -20,6 +20,7 @@ import { icon } from "./icons.js";
 import { builds, setBuild } from "./builds.js";
 import { readActive, writeActive, activeChannel } from "./active.js";
 import { joinRoom, faceImage } from "./presence.js";
+import { tooltips } from "./tooltip.js";
 
 const STYLESHEET = new URL("./latticework.css", import.meta.url).href;
 
@@ -195,6 +196,7 @@ export function mountLatticework(
   let root;
   let menu;
 
+  tooltips();
   const filesSidebar = sidebar ?? sidebarState("files", 200);
 
   // a stylesheet added by script doesn't hold up painting, so stay hidden
@@ -1835,6 +1837,16 @@ export function mountLatticework(
     return "";
   }
 
+  // the same, to the minute, for its tooltip
+  function touchedWhen(url) {
+    const info = docInfo(url);
+    const at = info.builtAt ?? info.editedAt;
+    if (!at) return "";
+    const when = ago(at, clock());
+    const exactly = new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    return `${info.builtAt ? "built" : "edited"} ${when.startsWith("on ") ? exactly : `${when} · ${exactly}`}`;
+  }
+
   // the dotted lines joining a row of the tree to its parent and children
   function guides(file) {
     const line = (kind, at) =>
@@ -1897,7 +1909,9 @@ export function mountLatticework(
                   ? `${file.name} used to be written by this. click to open it`
                   : file.ghost === "copied"
                     ? `${file.name} is a copy of this. click to open it`
-                    : `${file.name}\nclick to open it, or drag it onto a pane`}
+                    : [file.name, touchedWhen(file.url), "click to open it, or drag it onto a pane"]
+                        .filter(Boolean)
+                        .join("\n")}
               onClick=${() => open(file.url)}
               onKeyDown=${(event) => {
                 if (!file.ghost && (event.key === "Delete" || event.key === "Backspace")) {
@@ -1907,10 +1921,13 @@ export function mountLatticework(
             >
               <span class="knitoutjs-swatch"></span>
               <span class="lattice-file-name">${() => file.name}</span>
+              ${!file.ghost &&
+              html`<span class="lattice-file-when" title=${() => touchedWhen(file.url)}>
+                <span>${() => lastTouched(file.url)}</span>
+              </span>`}
             </button>
             ${!file.ghost &&
-            html`<span class="lattice-file-when">${() => lastTouched(file.url)}</span>
-              <button
+            html`<button
                 class="lattice-file-remove"
                 aria-label=${() => `remove ${file.name} from ${projectName()}`}
                 title=${() =>
