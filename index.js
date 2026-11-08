@@ -1,6 +1,6 @@
 import defaultJavaScriptContent from "./core/default-source.js";
 import { newFileDoc } from "./files.js";
-import { newPanel, newGroup, newSplit } from "./core/layout.js";
+import { newPanel, newGroup, newSplit } from "./core/layout-tree.js";
 
 export const KnitoutJSDatatype = {
   // patchwork calls this inside handle.change without waiting for it, so

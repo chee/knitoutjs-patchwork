@@ -1,0 +1,2 @@
+# tests run in node, not in patchwork
+test/

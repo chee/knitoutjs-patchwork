@@ -5,6 +5,10 @@
 	"main": "./index.js",
 	"scripts": {
 		"push": "pushwork sync",
-		"register": "pw-modules add \"$MODULE_SETTINGS_DOC_URL\" \"$(pushwork url)\""
+		"register": "pw-modules add \"$MODULE_SETTINGS_DOC_URL\" \"$(pushwork url)\"",
+		"test": "node --test test/*.test.js"
+	},
+	"devDependencies": {
+		"@automerge/automerge": "3.4.1"
 	}
 }

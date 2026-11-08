@@ -31,7 +31,7 @@ import {
   removePanel,
   setTool,
   activate,
-} from "./core/layout.js";
+} from "./core/layout-tree.js";
 import defaultSource from "./core/default-source.js";
 import { builds, setBuild } from "./core/builds.js";
 
