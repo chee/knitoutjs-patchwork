@@ -20,6 +20,7 @@ import { icon } from "./icons.js";
 import { builds, setBuild } from "./builds.js";
 import { readActive, writeActive, activeChannel } from "./active.js";
 import { joinRoom, faceImage } from "./presence.js";
+import { PANE_TAG, paneRepo, provideViewState } from "./view-state.js";
 import { pointerImage } from "./pointer.js";
 import { tooltips } from "./tooltip.js";
 
@@ -286,12 +287,125 @@ export function mountLatticework(
       for (const person of list) theirs.set(person.peer, person);
       setPeople(
         reconcile(
-          list.map(({ peer, name, colour, avatar, pointer, look }) => ({ peer, name, colour, avatar, pointer, look })),
+          list.map(({ peer, name, colour, avatar, pointer, look, builds }) => ({
+            peer,
+            name,
+            colour,
+            avatar,
+            pointer,
+            look,
+            builds,
+          })),
           { key: "peer" },
         ),
       );
-      if (following()) readLayout();
+      if (following()) {
+        readLayout();
+        showTheirViews();
+      }
     });
+  }
+
+  // ── what's going on in each pane: lattice answers patchwork:view-state
+  //    for what's in one (view-state.js), and its scroll is lattice's to
+  //    watch. yours goes to the room as it changes; following someone, it's
+  //    theirs each pane shows, till you scroll or click or type in one
+  const noViews = { follow() {}, docOf: () => null, forget() {}, stop() {} };
+  const views = roomHandle
+    ? provideViewState(element, { room: roomHandle, paneOf, onChange: shareView })
+    : noViews;
+
+  // the pane an event's from, by its id
+  function paneOf(event) {
+    for (const node of event.composedPath()) {
+      if (node === element) break;
+      if (node instanceof Element && node.localName === PANE_TAG) {
+        const id = panelOf(node);
+        if (id) return id;
+      }
+    }
+    return null;
+  }
+
+  // a pane's view, for everyone else: at most every POINTER_EVERY
+  const viewsToShare = new Set();
+  let viewTimer = null;
+  function shareView(id) {
+    if (!room || following()) return;
+    viewsToShare.add(id);
+    viewTimer ??= setTimeout(() => {
+      viewTimer = null;
+      for (const id of viewsToShare) {
+        const host = hosts.get(id);
+        if (!host) continue;
+        room.view(id, { url: host.url, tool: host.tool, doc: views.docOf(id), scroll: host.scroll ?? null });
+      }
+      viewsToShare.clear();
+    }, POINTER_EVERY);
+  }
+
+  // where an element is in a pane, as child indices, and back. null if it's
+  // somewhere else (in a shadow root, say)
+  function pathIn(root, el) {
+    const path = [];
+    for (let at = el; at !== root; at = at.parentElement) {
+      if (!at?.parentElement) return null;
+      path.unshift([...at.parentElement.children].indexOf(at));
+    }
+    return path;
+  }
+  function elementAt(root, path) {
+    let at = root;
+    for (const index of path) at = at?.children[index];
+    return at ?? null;
+  }
+
+  const portion = (at, range) =>
+    range > 0 ? Math.round(Math.min(1, Math.max(0, at / range)) * 10000) / 10000 : 0;
+  function onScroll(host, event) {
+    if (following()) return;
+    const path = event.target instanceof Element ? pathIn(host.el, event.target) : null;
+    if (!path) return;
+    const el = event.target;
+    host.scroll = {
+      path,
+      top: portion(el.scrollTop, el.scrollHeight - el.clientHeight),
+      left: portion(el.scrollLeft, el.scrollWidth - el.clientWidth),
+    };
+    shareView(host.id);
+  }
+  function scrollLike(host, scroll) {
+    const el = scroll && elementAt(host.el, scroll.path);
+    if (!el) return;
+    const top = scroll.top * (el.scrollHeight - el.clientHeight);
+    const left = scroll.left * (el.scrollWidth - el.clientWidth);
+    if (Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
+    if (Math.abs(el.scrollLeft - left) > 1) el.scrollLeft = left;
+  }
+
+  // following someone: each pane shows their view of it, if it's of the same
+  // doc in the same tool, and else a view of nothing yet. not following:
+  // yours, and back where you'd scrolled
+  function showTheirViews() {
+    const leader = following() && theirs.get(following());
+    for (const [id, host] of hosts) {
+      const view = leader?.views[id];
+      const here = view && view.url === host.url && view.tool === host.tool ? view : null;
+      views.follow(id, leader ? (here?.doc ?? {}) : null);
+      scrollLike(host, leader ? here?.scroll : host.scroll);
+    }
+  }
+
+  // scrolling or clicking over their panes stops following. they're inert
+  // while you follow, so it's where it is that says so, not what it's on
+  function onPaneInput(event) {
+    if (!following() || !root) return;
+    const box = root.getBoundingClientRect();
+    const { clientX: x, clientY: y } = event;
+    if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) follow(null);
+  }
+  for (const type of ["wheel", "pointerdown"]) {
+    element.addEventListener(type, onPaneInput, { capture: true, passive: true });
   }
 
   // your pointer, for everyone else: over which doc, in which tool, and
@@ -328,6 +442,7 @@ export function mountLatticework(
   function follow(peer) {
     setFollowing(peer && following() !== peer ? peer : null);
     readLayout();
+    showTheirViews();
   }
   const onEscape = (event) => {
     if (event.key === "Escape" && following()) follow(null);
@@ -546,13 +661,27 @@ export function mountLatticework(
     );
   }
 
+  // how a .js's build is going: yours, or someone else's in the room if
+  // theirs is newer. what's only yours (its builder, autobuild, whether it
+  // failed last) stays yours
+  function buildOf(jsUrl) {
+    const mine = builds[jsUrl] ?? {};
+    let latest = mine.state ? mine : null;
+    for (const person of people) {
+      const build = person.builds?.[jsUrl];
+      if (build && !(latest?.at >= build.at)) latest = build;
+    }
+    if (!latest || latest === mine) return mine;
+    return { ...mine, state: latest.state, line: latest.line, message: latest.message };
+  }
+
   // how a generated .k is doing: built, building, out of date, or its .js
   // failed. null once its .js writes somewhere else
   function buildState(kUrl) {
     const info = docInfo(kUrl);
     const source = info.source ? docInfo(info.source) : null;
     if (source?.target !== kUrl) return null;
-    const build = builds[info.source] ?? {};
+    const build = buildOf(info.source);
     if (build.state === "running") return "running";
     if (build.state === "error") return "error";
     const outOfDate = !!info.sourceHash && !!source.textHash && info.sourceHash !== source.textHash;
@@ -572,7 +701,7 @@ export function mountLatticework(
   // a build that failed: show the .js, at the line it failed on
   async function showError(jsUrl, fromPanelId) {
     await reveal(jsUrl, fromPanelId, "left", "editor");
-    const line = builds[jsUrl]?.line;
+    const line = buildOf(jsUrl).line;
     if (line != null) builds[jsUrl]?.builder?.goToLine(line);
   }
 
@@ -637,8 +766,9 @@ export function mountLatticework(
       return host;
     }
     if (host) destroyHost(id, host);
-    host = { url, tool, patchworkTool, el: document.createElement("div"), cleanup: null };
+    host = { id, url, tool, patchworkTool, el: document.createElement(PANE_TAG), cleanup: null };
     host.el.className = "knitoutjs-tool";
+    host.el.addEventListener("scroll", (event) => onScroll(host, event), { capture: true, passive: true });
     hosts.set(id, host);
     mountTool(host);
     return host;
@@ -660,11 +790,18 @@ export function mountLatticework(
 
   async function mountTool(host) {
     const tool = TOOLS[host.tool] ?? TOOLS.patchwork;
+    // its pane's in the page once its slot has it, just after this
+    await null;
+    if (host.dead) return;
+    // the tool finds docs from its pane, as one in a <patchwork-view> does
+    // from that, so what lattice answers for a pane (view-state.js) is
+    // answered for it, and the rest is answered further up as it was
+    host.repo = tool.drafts === false ? baseRepo : paneRepo(baseRepo, host.el);
     try {
       // a doc someone's only just made may take a moment to get here
       const found = new Promise((resolve) => {
         host.stopLooking = whenFound(
-          tool.drafts === false ? baseRepo : repo,
+          host.repo,
           host.url,
           resolve,
           () => {
@@ -682,10 +819,12 @@ export function mountLatticework(
       }
       host.cleanup = module.default(docHandle, host.el, {
         ...toolContext,
+        repo: host.repo,
         toolId: host.patchworkTool,
       });
       host.announced = true;
       announce("patchwork:mounted", host);
+      if (following()) showTheirViews();
     } catch (error) {
       if (host.dead) return;
       host.el.classList.add("knitoutjs-tool-broken");
@@ -700,7 +839,11 @@ export function mountLatticework(
     host.cleanup?.();
     if (host.announced) announce("patchwork:unmounted", host);
     host.el.remove();
-    if (hosts.get(id) === host) hosts.delete(id);
+    if (host.repo !== baseRepo) host.repo?.dispose?.();
+    if (hosts.get(id) !== host) return;
+    hosts.delete(id);
+    views.forget(id);
+    room?.view(id, null);
   }
 
   function Slot(props) {
@@ -1646,7 +1789,7 @@ export function mountLatticework(
     const panel = props.panel;
     const info = docInfo(panel.url);
     const jsUrl = () => info.source ?? panel.url;
-    const build = () => builds[jsUrl()] ?? {};
+    const build = () => buildOf(jsUrl());
 
     function state() {
       if (!info.source) return build().state === "error" ? "error" : null;
@@ -2048,6 +2191,20 @@ export function mountLatticework(
     createEffect(() => onShowing?.(showing()));
     createEffect(() => onFocused?.(focused()));
     createEffect(() => room?.share("look", look?.() === "mouse" ? "mouse" : "arrow"));
+    // how your builds of this project's .js are going, for everyone else
+    let sharedBuilds = "";
+    createEffect(() => {
+      if (!room) return;
+      const mine = {};
+      for (const url of fileUrls()) {
+        const { state, line, message, at } = builds[url] ?? {};
+        if (["running", "ok", "error"].includes(state)) mine[url] = { state, line, message, at };
+      }
+      const json = JSON.stringify(mine);
+      if (json === sharedBuilds) return;
+      sharedBuilds = json;
+      room.share("builds", JSON.parse(json));
+    });
     return html`<link
         rel="stylesheet"
         href=${STYLESHEET}
@@ -2103,8 +2260,13 @@ export function mountLatticework(
     layoutHandle.off("ephemeral-message", onDragMessage);
     clearTimeout(pointerTimer);
     document.removeEventListener("visibilitychange", onHidden);
+    views.stop();
     room?.stop();
     clearTimeout(shareTimer);
+    clearTimeout(viewTimer);
+    for (const type of ["wheel", "pointerdown"]) {
+      element.removeEventListener(type, onPaneInput, { capture: true });
+    }
     document.removeEventListener("keydown", onEscape);
     tabChannel.close();
     frameObserver.disconnect();

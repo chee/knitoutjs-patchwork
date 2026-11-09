@@ -3,15 +3,17 @@ import { createStore, unwrap } from "solid-js/store";
 // how each .js's builds are going, for the whole frame: its editor builds it
 // (by hand, or by itself with autobuild on) and says so here, so the panes
 // showing the .k it writes can say so too. keyed by the .js's url:
-// { state: "idle" | "running" | "ok" | "error" | "ask", line?, message?,
+// { state: "idle" | "running" | "ok" | "error" | "ask", line?, message?, at,
 //   auto, failed, builder?: { now(), goToLine(line) } }
 // there's only a builder while that .js is open in an editor. failed is how
-// its last build that finished went, kept while it's edited and built again
+// its last build that finished went, kept while it's edited and built again.
+// at is when its state was last said
 const [builds, setBuilds] = createStore({});
 
 export { builds };
 
 export function setBuild(url, build) {
+  if (build.state) build = { ...build, at: Date.now() };
   if (build.state === "error") build = { ...build, failed: true };
   if (build.state === "ok") build = { ...build, failed: false };
   setBuilds(url, build);

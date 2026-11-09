@@ -65,16 +65,67 @@ function activeFrom(value) {
     Object.entries(value).filter(([group, panel]) => typeof panel === "string" && group),
   );
 }
+const fraction = (n) => typeof n === "number" && n >= 0 && n <= 1;
+// a pane's view: the doc it shows, in which tool, the tool's view state
+// (view-state.js), and how far down and across it's scrolled: the element
+// that scrolls, by where it is in the pane (child indices), and fractions of
+// how far it goes
+function viewFrom(value) {
+  if (!isObject(value) || !isValidAutomergeUrl(string(value.url))) return null;
+  const scroll = value.scroll;
+  const scrolled =
+    isObject(scroll) &&
+    Array.isArray(scroll.path) &&
+    scroll.path.every((n) => Number.isInteger(n) && n >= 0) &&
+    fraction(scroll.top) &&
+    fraction(scroll.left);
+  return {
+    url: string(value.url),
+    tool: string(value.tool),
+    doc: isObject(value.doc) ? value.doc : {},
+    scroll: scrolled ? { path: scroll.path, top: scroll.top, left: scroll.left } : null,
+  };
+}
+// each pane's, by its id, from "view:<id>"
+function viewsFrom(value) {
+  const views = {};
+  for (const [key, view] of Object.entries(value)) {
+    if (!key.startsWith(VIEW)) continue;
+    const read = viewFrom(view);
+    if (read) views[key.slice(VIEW.length)] = read;
+  }
+  return views;
+}
+const STATES = new Set(["running", "ok", "error"]);
+// how their builds are going: by the .js's url, {state, line, message, at}
+function buildsFrom(value) {
+  if (!isObject(value)) return {};
+  const builds = {};
+  for (const [url, build] of Object.entries(value)) {
+    if (!isValidAutomergeUrl(url) || !isObject(build) || !STATES.has(build.state)) continue;
+    if (typeof build.at !== "number") continue;
+    builds[url] = {
+      state: build.state,
+      line: Number.isInteger(build.line) ? build.line : undefined,
+      message: build.message == null ? undefined : string(build.message),
+      at: build.at,
+    };
+  }
+  return builds;
+}
+const VIEW = "view:";
 
 /**
  * join the room on `handle`: the project's files, from the repo under any
  * draft overlay. `onPeople` hears everyone else whenever that changes:
- * [{peer, name, colour, avatar, nodes, active, pointer, look}], one each
- * (their tab that did something last). colour is their pointer's: their
- * contact's, or else one for them from the palette. `repo` finds who you are
- * (your account's contact). returns {share(channel, value), stop()}: share
- * sends "nodes", "active", "pointer" ({url, tool, x, y}, or null) or "look"
- * ("arrow" or "mouse")
+ * [{peer, name, colour, avatar, nodes, active, pointer, look, views,
+ * builds}], one each (their tab that did something last). colour is their
+ * pointer's: their contact's, or else one for them from the palette. `repo`
+ * finds who you are (your account's contact). returns {share(channel,
+ * value), view(id, value), stop()}: share sends "nodes", "active", "pointer"
+ * ({url, tool, x, y}, or null), "look" ("arrow" or "mouse") or "builds"
+ * ({[url]: {state, line, message, at}}); view sends a pane's view ({url,
+ * tool, doc, scroll}, or null once it's gone)
  */
 export function joinRoom(handle, repo, onPeople) {
   const presence = new Presence({ handle });
@@ -87,6 +138,7 @@ export function joinRoom(handle, repo, onPeople) {
     active: {},
     pointer: null,
     look: "arrow",
+    builds: {},
   };
   let dead = false;
 
@@ -108,6 +160,8 @@ export function joinRoom(handle, repo, onPeople) {
       active: activeFrom(value.active),
       pointer: pointerFrom(value.pointer),
       look: value.look === "mouse" ? "mouse" : "arrow",
+      views: viewsFrom(value),
+      builds: buildsFrom(value.builds),
     }));
   }
   // anyone heard of only partly (no contact yet: everyone sends one, if only
@@ -183,6 +237,7 @@ export function joinRoom(handle, repo, onPeople) {
 
   return {
     share,
+    view: (id, value) => share(VIEW + id, value),
     stop() {
       dead = true;
       clearInterval(again);
