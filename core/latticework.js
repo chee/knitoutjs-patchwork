@@ -174,6 +174,9 @@ function cellStyle(node, direction) {
  *              doc and returns its url, which opens
  *   onShowing  hears the docs the panes are showing ({url, name}, one per
  *              pane), for inspectors
+ *   onFocused  hears the one you're in ({url, name}, or null): what's
+ *              showing in the pane you last clicked in, tabbed to or
+ *              opened something in (or the first pane)
  *   onOpen     gets a way to bring a doc forward
  */
 export function mountLatticework(
@@ -190,6 +193,7 @@ export function mountLatticework(
     sidebar,
     menu: extraItems = [],
     onShowing,
+    onFocused,
     onOpen,
   },
 ) {
@@ -327,6 +331,9 @@ export function mountLatticework(
   // follow along
   // (following someone, it's theirs that shows, from the room)
   const [active, setActive] = createStore(readActive(layoutHandle.url));
+  // the pane you're in: last clicked in, tabbed to, or shown something in.
+  // where things opened from the files go, and whose doc is the one you're on
+  const [lastGroupId, setLastGroupId] = createSignal(null);
   const activeIn = (group) =>
     group.panels.find((panel) => panel.id === (following() ? theirActive : active)[group.id]) ??
     group.panels[0];
@@ -337,7 +344,9 @@ export function mountLatticework(
   room?.share("active", { ...active });
 
   function showTab(groupId, panelId) {
-    if (following() || !groupId || !panelId || active[groupId] === panelId) return;
+    if (following() || !groupId || !panelId) return;
+    setLastGroupId(groupId);
+    if (active[groupId] === panelId) return;
     setActive(groupId, panelId);
     tabChannel.post(groupId, panelId);
     // only what still points at a tab in its group
@@ -664,11 +673,8 @@ export function mountLatticework(
     noticeTimer = setTimeout(() => setNotice(null), 3500);
   }
 
-  // the pane last clicked in: where things opened from the files go
-  let lastGroupId = null;
-
   async function openDocs(urls, groupId, zone = "center") {
-    groupId ??= findGroup(lastGroupId) ? lastGroupId : null;
+    groupId ??= findGroup(lastGroupId()) ? lastGroupId() : null;
     const panels = [];
     const refused = [];
     for (const url of urls) {
@@ -1199,7 +1205,7 @@ export function mountLatticework(
 
   // a floating tab, back in the tiles: in the pane last used, if that's tiled
   function dockPanel(panel) {
-    updateLayout((nodes) => Layout.dock(nodes, panel.id, lastGroupId));
+    updateLayout((nodes) => Layout.dock(nodes, panel.id, lastGroupId()));
     activate(panel.id);
   }
 
@@ -1303,7 +1309,8 @@ export function mountLatticework(
     return html`<section
       class="knitoutjs-group"
       data-group=${group.id}
-      onPointerDown=${() => (lastGroupId = group.id)}
+      onPointerDown=${() => setLastGroupId(group.id)}
+      onFocusIn=${() => setLastGroupId(group.id)}
     >
       <header class="knitoutjs-tabs" role="tablist" ref=${(el) => (tabs = el)}>
         <${For} each=${() => group.panels}>
@@ -1999,8 +2006,16 @@ export function mountLatticework(
     return docs;
   }
 
+  // the doc in the pane you're in
+  function focused() {
+    const group = findGroup(lastGroupId()) ?? allGroups()[0];
+    const panel = group && activeIn(group);
+    return panel ? { url: panel.url, name: docInfo(panel.url).name } : null;
+  }
+
   const dispose = render(() => {
     createEffect(() => onShowing?.(showing()));
+    createEffect(() => onFocused?.(focused()));
     return html`<link
         rel="stylesheet"
         href=${STYLESHEET}

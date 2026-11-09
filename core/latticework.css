@@ -215,7 +215,7 @@
 		/* the name and its tool share this, so they shrink together */
 		font-size: 11px;
 		white-space: nowrap;
-		cursor: default;
+		cursor: var(--lattice-pointer, default);
 		user-select: none;
 
 		&[aria-selected="true"] {
@@ -1072,7 +1072,9 @@
 .knitoutjs-editor-tool.lattice-project {
 	--lattice-rule: var(--studio-chrome-fill-offset-30, #0002);
 	--lattice-muted: var(--studio-chrome-line-offset-30, #888);
-	--lattice-path-family: var(--studio-family-code, ui-monospace, monospace);
+	/* headings, and the names of things: the theme's code font, unless
+	   there's a heading font of its own */
+	--lattice-path-family: var(--lattice-heading-family, var(--studio-family-code, ui-monospace, monospace));
 
 	position: relative;
 	display: flex;
