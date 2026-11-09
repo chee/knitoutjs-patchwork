@@ -11,7 +11,7 @@ import {
   getRegistry,
   getSupportedToolsForType,
 } from "@inkandswitch/patchwork-plugins";
-import { docColour, docText, shortUrl, newFileDoc, textHash } from "./files.js";
+import { docColour, docText, shortUrl, newFileDoc, textHash, withExtension } from "./files.js";
 import * as Layout from "./layout.js";
 import { urlFromText, loadDatatype, createDocOfDatatype, whenFound } from "./patchwork-docs.js";
 import defaultSource from "./default-source.js";
@@ -431,9 +431,12 @@ export function mountLatticework(
           const datatype = await loadDatatype(docHandle.doc()?.["@patchwork"]?.type);
           const update = () => {
             const doc = docHandle.doc();
+            const extension = fileExtension(doc);
+            const named = doc?.name || doc?.title || datatype?.module.getTitle?.(doc);
             setInfo({
-              name: doc?.name || doc?.title || datatype?.module.getTitle?.(doc) || shortUrl(url),
-              extension: fileExtension(doc),
+              // with its extension, if its name hasn't one
+              name: named ? withExtension(named, extension) : shortUrl(url),
+              extension,
               target: doc?.knitoutTarget ?? null,
               source: doc?.knitoutSource ?? null,
               editable: typeof doc?.content === "string",
@@ -1496,9 +1499,10 @@ export function mountLatticework(
       setRenaming(false);
       name = name.trim();
       if (!name || name === info.name) return;
+      // a name without an extension keeps the one it had
       (await repo.find(panel.url)).change((doc) => {
         doc.name = name;
-        doc.extension = fileExtension({ name });
+        doc.extension = fileExtension({ name }) || doc.extension || "";
       });
     }
 
@@ -1885,56 +1889,6 @@ export function mountLatticework(
     removingTimer = setTimeout(() => setRemoving(null), 3000);
   }
 
-  // the project's files as a family tree. a .k is under the .js that writes
-  // it now. one that .js used to write, and an editable copy, are files of
-  // their own (at the top), with a ghost of them where they came from: under
-  // that .js, or the .k they copy. [{url, name, extension, depth, last,
-  // parent, trail, ghost}]: `last` among its siblings, `parent` of the rows
-  // under it, `trail`, for each of its ancestors below the top, whether that
-  // one has more siblings below (so its line carries on past this row), and
-  // `ghost`, "written" or "copied" for a ghost (it has no rows of its own)
-  const fileTree = createMemo(() => {
-    const list = projectFiles();
-    const inProject = new Set(list.map((file) => file.url));
-    const children = new Map();
-    const addChild = (parent, file, ghost) => {
-      if (!children.has(parent)) children.set(parent, []);
-      children.get(parent).push({ file, ghost });
-    };
-    const roots = [];
-    for (const file of list) {
-      const info = docInfo(file.url);
-      const writer = info.source !== file.url && inProject.has(info.source) ? info.source : null;
-      const writtenNow = !!writer && docInfo(writer).target === file.url;
-      if (writer) addChild(writer, file, writtenNow ? false : "written");
-      if (info.copyOf !== file.url && inProject.has(info.copyOf)) addChild(info.copyOf, file, "copied");
-      if (!writtenNow) roots.push(file);
-    }
-    // its own children first, then the ghosts
-    for (const kids of children.values()) kids.sort((a, b) => !!a.ghost - !!b.ghost);
-
-    const rows = [];
-    const seen = new Set();
-    const visit = (file, depth, trail = [], last = true, ghost = false) => {
-      if (!ghost) {
-        if (seen.has(file.url)) return;
-        seen.add(file.url);
-      }
-      const kids = ghost
-        ? []
-        : (children.get(file.url) ?? []).filter((kid) => kid.ghost || !seen.has(kid.file.url));
-      rows.push({ ...file, depth, trail, last, ghost, parent: kids.length > 0 });
-      const kidsTrail = depth ? [...trail, !last] : [];
-      kids.forEach((kid, i) =>
-        visit(kid.file, depth + 1, kidsTrail, i === kids.length - 1, kid.ghost),
-      );
-    };
-    for (const file of roots) visit(file, 0);
-    // files whose parents lead round in a circle
-    for (const file of list) visit(file, 0);
-    return rows;
-  });
-
   // "built 3 min ago", "edited just now"
   function lastTouched(url) {
     const info = docInfo(url);
@@ -1951,17 +1905,6 @@ export function mountLatticework(
     const when = ago(at, clock());
     const exactly = new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
     return `${info.builtAt ? "built" : "edited"} ${when.startsWith("on ") ? exactly : `${when} · ${exactly}`}`;
-  }
-
-  // the dotted lines joining a row of the tree to its parent and children
-  function guides(file) {
-    const line = (kind, at) =>
-      html`<span class=${`lattice-guide ${kind}`} style=${{ "--at": at }}></span>`;
-    return [
-      ...file.trail.map((carriesOn, at) => carriesOn && line("", at)),
-      file.depth > 0 && line(file.last ? "lattice-guide-last" : "lattice-guide-tee", file.depth - 1),
-      file.parent && line("lattice-guide-down", file.depth),
-    ].filter(Boolean);
   }
 
   // the project's files, down the side of its panes
@@ -1986,15 +1929,13 @@ export function mountLatticework(
           </button>
         </header>
         <${For}
-          each=${fileTree}
+          each=${projectFiles}
           fallback=${html`<p class="lattice-files-empty">no files yet</p>`}
         >
           ${(file) => html`<div
             class="lattice-file"
             data-colour=${docColour(file.url)}
-            style=${{ "--depth": file.depth }}
-            data-ghost=${file.ghost || undefined}
-            data-showing=${() => (!file.ghost && findShowing(file.url) ? "" : undefined)}
+            data-showing=${() => (findShowing(file.url) ? "" : undefined)}
             data-removing=${() => (removing() === file.url ? "" : undefined)}
             draggable="true"
             onDragStart=${(event) => {
@@ -2007,33 +1948,24 @@ export function mountLatticework(
             onPointerEnter=${() => setHovered(file.url)}
             onPointerLeave=${unhover}
           >
-            ${guides(file)}
             <button
               class="lattice-file-open"
               title=${() =>
-                file.ghost === "written"
-                  ? `${file.name} used to be written by this. click to open it`
-                  : file.ghost === "copied"
-                    ? `${file.name} is a copy of this. click to open it`
-                    : [file.name, touchedWhen(file.url), "click to open it, or drag it onto a pane"]
-                        .filter(Boolean)
-                        .join("\n")}
+                [file.name, touchedWhen(file.url), "click to open it, or drag it onto a pane"]
+                  .filter(Boolean)
+                  .join("\n")}
               onClick=${() => open(file.url)}
               onKeyDown=${(event) => {
-                if (!file.ghost && (event.key === "Delete" || event.key === "Backspace")) {
-                  askToRemove(file.url);
-                }
+                if (event.key === "Delete" || event.key === "Backspace") askToRemove(file.url);
               }}
             >
               <span class="knitoutjs-swatch"></span>
               <span class="lattice-file-name">${() => file.name}</span>
-              ${!file.ghost &&
-              html`<span class="lattice-file-when" title=${() => touchedWhen(file.url)}>
+              <span class="lattice-file-when" title=${() => touchedWhen(file.url)}>
                 <span>${() => lastTouched(file.url)}</span>
-              </span>`}
+              </span>
             </button>
-            ${!file.ghost &&
-            html`<button
+            <button
                 class="lattice-file-remove"
                 aria-label=${() => `remove ${file.name} from ${projectName()}`}
                 title=${() =>
@@ -2043,7 +1975,7 @@ export function mountLatticework(
                 onClick=${() => askToRemove(file.url)}
               >
                 ${() => (removing() === file.url ? "remove?" : icon("close", 12))}
-              </button>`}
+              </button>
           </div>`}
         <//>
       </div>

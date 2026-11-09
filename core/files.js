@@ -48,6 +48,16 @@ export function fileExtension(doc) {
   return match ? match[1].toLowerCase() : "";
 }
 
+// a doc's name, with its extension (a UnixFileEntry's `extension`, or what
+// the app says it is) after it, if the name hasn't one of its own. so
+// everything shows as a file: pattern.k, kniterate.machine
+export function withExtension(name, extension) {
+  name = String(name ?? "");
+  extension = String(extension ?? "").replace(/^\./, "");
+  if (!name || !extension || /\.[^.\s/]+$/.test(name)) return name;
+  return `${name}.${extension}`;
+}
+
 // each doc gets a colour of its own, so every pane showing it wears the same
 // one. the colours are tokens in latticework.css
 export const DOC_COLOURS = [

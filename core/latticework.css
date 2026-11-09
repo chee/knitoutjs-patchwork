@@ -13,7 +13,12 @@
 	& [theme] {
 		--knitoutjs-ink: var(--studio-line, #1c1a17);
 		--knitoutjs-fill: var(--studio-fill, #fffdf5);
-		--knitoutjs-muted: var(--studio-line-offset-50, color-mix(in oklab, var(--knitoutjs-ink) 55%, transparent));
+		/* gentle text: the sheet's own colour, moved half oklch's lightness
+		   from it (towards black on a light sheet, white on a dark one). a
+		   mix of ink and fill is only as readable as the theme's ink is
+		   strong; this is 4.5:1 or more on the sheet and the chrome in any
+		   theme. it keeps the sheet's hue, so a tinted theme's stays tinted */
+		--knitoutjs-muted: oklch(from var(--knitoutjs-fill) calc(l + (1 - 2 * round(l)) * 0.5) c h);
 		--knitoutjs-line: var(--studio-chrome-line, var(--knitoutjs-ink));
 		--knitoutjs-line-soft: var(--studio-fill-offset-20, color-mix(in oklab, var(--knitoutjs-ink) 16%, transparent));
 
@@ -750,6 +755,12 @@
 		font-size: 11px;
 	}
 
+	/* what a box says before anything's in it: gentle, but readable */
+	& ::placeholder {
+		color: var(--knitoutjs-muted);
+		opacity: 1;
+	}
+
 	/* a filled button's text: offset black or white, whichever reads better
 	   on its fill. a button says what it's filled with as --button-fill and
 	   takes var(--button-ink, …) for its colour: the …, where browsers can't
@@ -1277,21 +1288,8 @@
 			color: var(--studio-line, #383a42);
 			font-weight: 600;
 		}
-
-		/* where a file used to be: under the .js that wrote it, or the .k it's
-		   a copy of. the file itself is elsewhere in the list */
-		&[data-ghost] {
-			opacity: 0.5;
-			font-style: italic;
-
-			& .knitoutjs-swatch {
-				border-style: dashed;
-				background: none;
-			}
-		}
 	}
 
-	/* a file built from another sits under it, indented by --depth */
 	& .lattice-file-open {
 		display: flex;
 		flex: 1;
@@ -1299,7 +1297,7 @@
 		gap: 6px;
 		min-width: 0;
 		min-height: 24px;
-		padding: 0 4px 0 calc(18px + var(--depth, 0) * 14px);
+		padding: 0 4px 0 18px;
 		border: none;
 		background: none;
 		text-align: left;
@@ -1343,37 +1341,6 @@
 			content: "";
 			height: 1.4em;
 		}
-	}
-
-	/* the tree's dotted lines, down through the middle of the swatches: --at
-	   is the depth whose swatches the line runs under. a plain one carries on
-	   past this row; a tee branches off to this row's swatch, and so does the
-	   last one, ending there; down runs from a parent to its first child */
-	& .lattice-guide {
-		position: absolute;
-		top: 0;
-		bottom: 0;
-		left: calc(23px + var(--at) * 14px);
-		border-left: 1px dotted var(--lattice-muted);
-		pointer-events: none;
-	}
-	& .lattice-guide-tee::after,
-	& .lattice-guide-last::after {
-		content: "";
-		position: absolute;
-		top: 50%;
-		left: 0;
-		width: 9px;
-		border-top: 1px dotted var(--lattice-muted);
-	}
-	& .lattice-guide-last {
-		bottom: 50%;
-	}
-	& .lattice-guide-last::after {
-		top: 100%;
-	}
-	& .lattice-guide-down {
-		top: calc(50% + 5px);
 	}
 
 	/* shown on hover, or while it's asking to be pressed again: over the end
