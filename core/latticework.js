@@ -13,13 +13,14 @@ import {
 } from "@inkandswitch/patchwork-plugins";
 import { docColour, docText, shortUrl, newFileDoc, textHash } from "./files.js";
 import * as Layout from "./layout.js";
-import { urlFromText, loadDatatype, createDocOfDatatype } from "./patchwork-docs.js";
+import { urlFromText, loadDatatype, createDocOfDatatype, whenFound } from "./patchwork-docs.js";
 import defaultSource from "./default-source.js";
 import { Resizer, sidebarState } from "./sidebars.js";
 import { icon } from "./icons.js";
 import { builds, setBuild } from "./builds.js";
 import { readActive, writeActive, activeChannel } from "./active.js";
 import { joinRoom, faceImage } from "./presence.js";
+import { pointerImage } from "./pointer.js";
 import { tooltips } from "./tooltip.js";
 
 const STYLESHEET = new URL("./latticework.css", import.meta.url).href;
@@ -57,6 +58,8 @@ const OUTER_EDGE = 10;
 // then while it's held still. theirs shows until the doc has it, or until
 // they've been quiet this long (their page shut mid-drag, say)
 const LIVE_EVERY = 33;
+// how often your pointer goes to everyone else, at most
+const POINTER_EVERY = 50;
 const LIVE_QUIET = 4000;
 
 // a floating window: how small it gets, how much of it stays in reach, and
@@ -178,6 +181,9 @@ function cellStyle(node, direction) {
  *              showing in the pane you last clicked in, tabbed to or
  *              opened something in (or the first pane)
  *   onOpen     gets a way to bring a doc forward
+ *   pointer    what your pointer looks like to everyone else: a function
+ *              giving "arrow" or "mouse" (read in an effect, so it can be a
+ *              signal). an arrow, without one
  */
 export function mountLatticework(
   element,
@@ -195,6 +201,7 @@ export function mountLatticework(
     onShowing,
     onFocused,
     onOpen,
+    pointer: look,
   },
 ) {
   let root;
@@ -279,13 +286,43 @@ export function mountLatticework(
       for (const person of list) theirs.set(person.peer, person);
       setPeople(
         reconcile(
-          list.map(({ peer, name, colour, avatar }) => ({ peer, name, colour, avatar })),
+          list.map(({ peer, name, colour, avatar, pointer, look }) => ({ peer, name, colour, avatar, pointer, look })),
           { key: "peer" },
         ),
       );
       if (following()) readLayout();
     });
   }
+
+  // your pointer, for everyone else: over which doc, in which tool, and
+  // where in its pane (fractions of it, since their panes aren't the size
+  // of yours). at most every POINTER_EVERY; null once it's off the panes
+  let pointerTimer = null;
+  let pointerNext;
+  let pointerSent = null;
+  function sharePointer(value) {
+    if (!room) return;
+    pointerNext = value;
+    pointerTimer ??= setTimeout(() => {
+      pointerTimer = null;
+      const json = JSON.stringify(pointerNext);
+      if (json === pointerSent) return;
+      pointerSent = json;
+      room.share("pointer", pointerNext);
+    }, POINTER_EVERY);
+  }
+  const offPanes = () => sharePointer(null);
+  const onHidden = () => document.visibilityState === "hidden" && offPanes();
+  document.addEventListener("visibilitychange", onHidden);
+
+  // everyone else's pointer over this panel: theirs over the same doc in the
+  // same tool
+  const pointersOver = (panel) =>
+    panel
+      ? people.filter(
+          (person) => person.pointer && person.pointer.url === panel.url && person.pointer.tool === panel.tool,
+        )
+      : [];
 
   // someone's panes instead of yours, or yours again (`peer` again, or none)
   function follow(peer) {
@@ -383,9 +420,12 @@ export function mountLatticework(
       });
       entry = { info, off: null };
       infos.set(url, entry);
-      repo
-        .find(url)
-        .then(async (docHandle) => {
+      // someone else's new doc may not be here yet: it's looked for until
+      // it is, and only said to be missing once it's been a while
+      entry.off = whenFound(
+        repo,
+        url,
+        async (docHandle) => {
           // a doc that isn't a file (markdown, say) may only have a title its
           // datatype can find in it
           const datatype = await loadDatatype(docHandle.doc()?.["@patchwork"]?.type);
@@ -409,11 +449,13 @@ export function mountLatticework(
               textHash: fileExtension(doc) === "js" ? textHash(docText(doc)) : null,
             });
           };
+          if (entry.gone) return;
           update();
           docHandle.on("change", update);
           entry.off = () => docHandle.off("change", update);
-        })
-        .catch(() => setInfo({ name: `missing ${shortUrl(url)}` }));
+        },
+        () => setInfo({ name: `missing ${shortUrl(url)}` }),
+      );
     }
     return entry.info;
   }
@@ -616,11 +658,25 @@ export function mountLatticework(
   async function mountTool(host) {
     const tool = TOOLS[host.tool] ?? TOOLS.patchwork;
     try {
-      const [docHandle, module] = await Promise.all([
-        (tool.drafts === false ? baseRepo : repo).find(host.url),
-        tool.load(),
-      ]);
+      // a doc someone's only just made may take a moment to get here
+      const found = new Promise((resolve) => {
+        host.stopLooking = whenFound(
+          tool.drafts === false ? baseRepo : repo,
+          host.url,
+          resolve,
+          () => {
+            if (host.dead) return;
+            host.el.classList.add("knitoutjs-tool-waiting");
+            host.el.textContent = "still looking for this";
+          },
+        );
+      });
+      const [docHandle, module] = await Promise.all([found, tool.load()]);
       if (host.dead) return;
+      if (host.el.classList.contains("knitoutjs-tool-waiting")) {
+        host.el.classList.remove("knitoutjs-tool-waiting");
+        host.el.replaceChildren();
+      }
       host.cleanup = module.default(docHandle, host.el, {
         ...toolContext,
         toolId: host.patchworkTool,
@@ -637,6 +693,7 @@ export function mountLatticework(
   function destroyHost(id, host) {
     if (host.dead) return;
     host.dead = true;
+    host.stopLooking?.();
     host.cleanup?.();
     if (host.announced) announce("patchwork:unmounted", host);
     host.el.remove();
@@ -673,14 +730,15 @@ export function mountLatticework(
     noticeTimer = setTimeout(() => setNotice(null), 3500);
   }
 
-  async function openDocs(urls, groupId, zone = "center") {
+  async function openDocs(urls, groupId, zone = "center", toolId) {
     groupId ??= findGroup(lastGroupId()) ? lastGroupId() : null;
     const panels = [];
     const refused = [];
     for (const url of urls) {
       try {
         const doc = (await repo.find(url)).doc();
-        panels.push(Layout.newPanel(url, toolsFor(fileExtension(doc))[0].id));
+        const tools = toolsFor(fileExtension(doc));
+        panels.push(Layout.newPanel(url, (tools.find((tool) => tool.id === toolId) ?? tools[0]).id));
       } catch {
         refused.push(shortUrl(url));
       }
@@ -719,8 +777,10 @@ export function mountLatticework(
     runInto(jsHandle, kHandle, repo);
   }
 
+  // a new file opens as text, ready to write in (a .k too, which would
+  // otherwise open in whatever draws it)
   async function newFile(groupId, name) {
-    openDocs([await createFile(name)], groupId);
+    openDocs([await createFile(name)], groupId, "center", TOOLS.editor ? "editor" : undefined);
   }
 
   // a doc of one of patchwork's own datatypes, as its sidebar makes them
@@ -1311,6 +1371,20 @@ export function mountLatticework(
       data-group=${group.id}
       onPointerDown=${() => setLastGroupId(group.id)}
       onFocusIn=${() => setLastGroupId(group.id)}
+      onPointerMove=${(event) => {
+        const panel = active();
+        if (!panel || following()) return;
+        const rect = body.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const fraction = (n) => Math.round(Math.min(2, Math.max(-1, n)) * 10000) / 10000;
+        sharePointer({
+          url: panel.url,
+          tool: panel.tool,
+          x: fraction((event.clientX - rect.left) / rect.width),
+          y: fraction((event.clientY - rect.top) / rect.height),
+        });
+      }}
+      onPointerLeave=${offPanes}
     >
       <header class="knitoutjs-tabs" role="tablist" ref=${(el) => (tabs = el)}>
         <${For} each=${() => group.panels}>
@@ -1348,6 +1422,31 @@ export function mountLatticework(
         <${Show} when=${() => notice()?.groupId === group.id}>
           <div class="knitoutjs-notice">${() => notice()?.text}</div>
         <//>
+        <div class="latticework-pointers" aria-hidden="true">
+          <${For} each=${() => pointersOver(active())}>
+            ${(person) => {
+              const image = () => pointerImage(person.colour, person.look);
+              return html`<div
+                class="latticework-pointer"
+                data-look=${() => person.look}
+                style=${() => ({
+                  left: `${(person.pointer?.x ?? 0) * 100}%`,
+                  top: `${(person.pointer?.y ?? 0) * 100}%`,
+                  "--button-fill": person.colour,
+                })}
+              >
+                <img
+                  src=${() => image()?.src}
+                  width=${() => image()?.size}
+                  height=${() => image()?.size}
+                  style=${() => ({ translate: `${-(image()?.x ?? 0)}px ${-(image()?.y ?? 0)}px` })}
+                  alt=""
+                />
+                <span class="latticework-pointer-name">${() => person.name}</span>
+              </div>`;
+            }}
+          <//>
+        </div>
       </div>
     </section>`;
   }
@@ -1879,7 +1978,7 @@ export function mountLatticework(
           <${Faces} />
           <button
             class="lattice-icon-button"
-            title="a new file, or open one (hold alt for more)"
+            title="a new file, or open one"
             aria-label="a new file, or open one"
             onClick=${(event) => openMenu(event, null)}
           >
@@ -2016,6 +2115,7 @@ export function mountLatticework(
   const dispose = render(() => {
     createEffect(() => onShowing?.(showing()));
     createEffect(() => onFocused?.(focused()));
+    createEffect(() => room?.share("look", look?.() === "mouse" ? "mouse" : "arrow"));
     return html`<link
         rel="stylesheet"
         href=${STYLESHEET}
@@ -2069,6 +2169,8 @@ export function mountLatticework(
   return function unmount() {
     layoutHandle.off("change", readLayout);
     layoutHandle.off("ephemeral-message", onDragMessage);
+    clearTimeout(pointerTimer);
+    document.removeEventListener("visibilitychange", onHidden);
     room?.stop();
     clearTimeout(shareTimer);
     document.removeEventListener("keydown", onEscape);
@@ -2087,7 +2189,10 @@ export function mountLatticework(
     clearInterval(ticker);
     offPatchworkTools();
     for (const [id, host] of hosts) destroyHost(id, host);
-    for (const { off } of infos.values()) off?.();
+    for (const entry of infos.values()) {
+      entry.gone = true;
+      entry.off?.();
+    }
     dispose();
   };
 }

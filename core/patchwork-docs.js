@@ -69,3 +69,48 @@ export async function describeDoc(url, repo) {
   const name = doc?.name ?? doc?.title ?? datatype?.module.getTitle?.(doc);
   return { name: name == null ? "" : String(name), type: type == null ? "file" : String(type) };
 }
+
+// a doc, once it's here. one someone's only just made may not have reached
+// us yet: repo.find gives up on it, but the repo keeps looking, and says when
+// it's found it. so this waits as long as it takes, and asks again now and
+// then too. `onFound(handle)` once it's here; `onMissing()` once, if it's
+// still not after a while. returns a stop
+const MISSING_AFTER = 8000;
+const LOOK_AGAIN = [1000, 2000, 4000, 8000, 15000, 30000];
+export function whenFound(repo, url, onFound, onMissing) {
+  let done = false;
+  let tries = 0;
+  let again = null;
+  let unsubscribe = null;
+  const missing = setTimeout(() => !done && onMissing?.(), MISSING_AFTER);
+  function stop() {
+    done = true;
+    clearTimeout(again);
+    clearTimeout(missing);
+    unsubscribe?.();
+    unsubscribe = null;
+  }
+  function look() {
+    if (done) return;
+    repo.find(url).then(
+      (handle) => {
+        if (done) return;
+        stop();
+        onFound(handle);
+      },
+      () => {
+        if (done) return;
+        if (!unsubscribe) {
+          try {
+            unsubscribe = repo.findWithProgress?.(url)?.subscribe?.((state) => {
+              if (state?.state === "ready") look();
+            });
+          } catch {}
+        }
+        again = setTimeout(look, LOOK_AGAIN[Math.min(tries++, LOOK_AGAIN.length - 1)]);
+      },
+    );
+  }
+  look();
+  return stop;
+}

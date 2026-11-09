@@ -160,8 +160,9 @@
 		}
 
 		&[aria-checked="true"] {
-			background: var(--knitoutjs-accent, CanvasText);
-			color: var(--knitoutjs-accent-ink, Canvas);
+			--button-fill: var(--knitoutjs-accent, CanvasText);
+			background: var(--button-fill);
+			color: var(--button-ink, var(--knitoutjs-accent-ink, Canvas));
 		}
 	}
 }

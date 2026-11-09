@@ -570,6 +570,11 @@
 		color: var(--knitoutjs-danger);
 	}
 
+	& .knitoutjs-tool-waiting {
+		padding: 12px;
+		color: var(--knitoutjs-muted);
+	}
+
 	/* ── dropping things in ───────────────────────────────────────────────── */
 
 	& .knitoutjs-dropzone {
@@ -645,6 +650,48 @@
 		color: var(--knitoutjs-ink);
 	}
 
+	/* everyone else's pointers, over the doc they're pointing at: an arrow
+	   or a mouse in their colour, their point where theirs is, their name
+	   beside it. they glide the little way between one update and the next */
+	& .latticework-pointers {
+		position: absolute;
+		inset: 0;
+		z-index: 11;
+		overflow: hidden;
+		pointer-events: none;
+	}
+
+	& .latticework-pointer {
+		position: absolute;
+		transition:
+			left 60ms linear,
+			top 60ms linear;
+
+		& img {
+			position: absolute;
+			display: block;
+			max-width: none;
+		}
+	}
+
+	& .latticework-pointer-name {
+		position: absolute;
+		top: 16px;
+		left: 10px;
+		padding: 1px 6px;
+		border-radius: var(--studio-radius-round, 999px);
+		background: var(--button-fill);
+		color: var(--button-ink, #fff);
+		font: 600 10.5px/1.4 var(--studio-family-ui, system-ui, sans-serif);
+		white-space: nowrap;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		& .latticework-pointer {
+			transition: none;
+		}
+	}
+
 	/* ── buttons: a 1px line and a 1px shadow, lifting on hover ───────────── */
 
 	& .knitoutjs-button {
@@ -703,17 +750,28 @@
 		font-size: 11px;
 	}
 
+	/* a filled button's text: offset black or white, whichever reads better
+	   on its fill. a button says what it's filled with as --button-fill and
+	   takes var(--button-ink, …) for its colour: the …, where browsers can't
+	   tell (offset black is black with a fifth of the fill in it) */
+	@supports (color: contrast-color(red)) {
+		& :where(button, label, .latticework-pointer-name) {
+			--button-ink: oklch(from color-mix(in oklch, contrast-color(var(--button-fill)) 80%, var(--button-fill)) max(l, round(l, 1)) calc(c * (1 - round(l, 1))) h);
+		}
+	}
+
 	/* doubled up to outrank a shell's `button { color: inherit }` */
 	& .knitoutjs-button.knitoutjs-run {
+		--button-fill: var(--knitoutjs-accent);
 		min-width: 5em;
 		padding: 1px 12px;
-		background: var(--knitoutjs-accent);
-		color: var(--knitoutjs-accent-ink);
+		background: var(--button-fill);
+		color: var(--button-ink, var(--knitoutjs-accent-ink));
 		font-weight: 600;
 
 		&[data-running] {
-			background: var(--knitoutjs-ink);
-			color: var(--knitoutjs-sheet);
+			--button-fill: var(--knitoutjs-ink);
+			color: var(--button-ink, var(--knitoutjs-sheet));
 		}
 	}
 

@@ -281,7 +281,7 @@ export default function KnitoutEditorTool(handle, element, context) {
         : "build the pattern: it writes its knitout into the .k file chosen on the right (⌘↵)"}
         onClick=${() => (run.running() ? run.stop() : run.now())}
       >
-        ${() => (run.running() ? [icon("stop"), " stop"] : [icon("build"), " build"])}
+        ${() => (run.running() ? "stop" : "build")}
       </button>
       <label
         class="knitoutjs-auto"
